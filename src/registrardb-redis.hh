@@ -281,6 +281,7 @@ private:
 	void onTryReconnectTimer();
 
 	redisAsyncContext* mContext{nullptr};
+	// Why do we need a second context?? Why don't we issue the subscribe commands through the main context? Why initiate (and manage) 2 connections to the same server?
 	redisAsyncContext* mSubscribeContext{nullptr};
 	RecordSerializer* mSerializer;
 	RedisParameters mParams{};

@@ -516,6 +516,7 @@ bool RegistrarDbRedisAsync::disconnect() {
 	}
 	if (mSubscribeContext) {
 		// Workaround for issue https://github.com/redis/hiredis/issues/396
+		// Fixed in hiredis 0.14.0
 		redisAsyncCommand(mSubscribeContext, nullptr, nullptr, "UNSUBSCRIBE %s", "FLEXISIP");
 		redisAsyncDisconnect(mSubscribeContext);
 		mSubscribeContext = nullptr;
