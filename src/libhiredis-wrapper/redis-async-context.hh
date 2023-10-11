@@ -42,6 +42,9 @@ private:
 
 class Context {
 public:
+	template <typename TContextData>
+	friend class TypedContext;
+
 	struct ContextDeleter {
 		void operator()(redisAsyncContext*) noexcept;
 	};
@@ -94,7 +97,8 @@ private:
 	std::string mLogPrefix{};
 	RedisParameters mParams{};
 	std::weak_ptr<void> mCustomData;
-	// Must be the last member of self, such that it is deleted first,  redisAsyncFree
+	// Must be the last member of self, to be destructed first. Destructing the ContextPtr calls onDisconnect
+	// synchronously, which still needs access to the rest of self.
 	State mState{Disconnected()};
 };
 
@@ -106,9 +110,9 @@ public:
 
 	class Connected : Context::Connected {
 	public:
-		template <typename TCommandData>
+		template <typename TCommandData = std::nullptr_t>
 		CommandWithData<TCommandData> command(const RedisArgsPacker& args,
-		                                          std::unique_ptr<TCommandData>&& commandData) {
+		                                      std::unique_ptr<TCommandData>&& commandData = nullptr) {
 			return CommandWithData<TCommandData>(*this, args, std::move(commandData));
 		}
 	};
@@ -132,7 +136,8 @@ public:
 						    (instance.*method)(typedContext, static_cast<const redisReply*>(reply),
 						                       std::move(commandData));
 					    } catch (std::exception& exc) {
-						    SLOGE << "Unhandled exception in Redis callback: " << exc.what();
+						    SLOGE << typedContext.mContext.mLogPrefix
+						          << "Unhandled exception in callback: " << exc.what();
 					    }
 				    }
 			    },

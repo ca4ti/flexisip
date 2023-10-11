@@ -5,6 +5,7 @@
 #include "libhiredis-wrapper/redis-async-context.hh"
 
 #include <cstddef>
+#include <exception>
 #include <memory>
 #include <variant>
 
@@ -54,7 +55,7 @@ void test() {
 	    1, [&context]() { return std::holds_alternative<decltype(context)::Connected>(context.getState()); }));
 
 	auto& ready = std::get<decltype(context)::Connected>(context.getState());
-	ready.command({"HGETALL", "*"}, std::unique_ptr<std::nullptr_t>{}).then<&TestRedisClient::onHGETALL>();
+	ready.command({"HGETALL", "*"}).then<&TestRedisClient::onHGETALL>();
 
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&replyReceived = handler->mReplyReceived]() { return replyReceived; }));
 }
