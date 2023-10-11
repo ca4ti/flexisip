@@ -54,7 +54,7 @@ void test() {
 	    1, [&context]() { return std::holds_alternative<decltype(context)::Connected>(context.getState()); }));
 
 	auto& ready = std::get<decltype(context)::Connected>(context.getState());
-	ready.sendCommand<std::nullptr_t, &TestRedisClient::onHGETALL>({"HGETALL", "*"}, nullptr);
+	ready.command({"HGETALL", "*"}, std::unique_ptr<std::nullptr_t>{}).then<&TestRedisClient::onHGETALL>();
 
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&replyReceived = handler->mReplyReceived]() { return replyReceived; }));
 }

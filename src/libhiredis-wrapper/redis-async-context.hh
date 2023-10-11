@@ -65,7 +65,6 @@ public:
 		friend class Context;
 		friend std::ostream& operator<<(std::ostream&, const Connected&);
 
-	protected:
 		int sendCommand(redisCallbackFn* fn, const RedisArgsPacker& args, void* privdata);
 
 	private:
@@ -102,16 +101,31 @@ private:
 template <typename TContextData>
 class TypedContext {
 public:
+	template <typename TData>
+	class CommandWithData;
+
 	class Connected : Context::Connected {
 	public:
-		template <typename TCommandData,
-		          void (TContextData::*method)(
-		              TypedContext<TContextData>&, const redisReply*, std::unique_ptr<TCommandData>&&)>
-		int sendCommand(const RedisArgsPacker& args, std::unique_ptr<TCommandData>&& commandData) {
-			return Context::Connected::sendCommand(
+		template <typename TCommandData>
+		CommandWithData<TCommandData> command(const RedisArgsPacker& args,
+		                                          std::unique_ptr<TCommandData>&& commandData) {
+			return CommandWithData<TCommandData>(*this, args, std::move(commandData));
+		}
+	};
+	static_assert(sizeof(Connected) == sizeof(Context::Connected), "Must be reinterpret_cast-able");
+
+	template <typename TData>
+	class CommandWithData {
+	public:
+		friend class Connected;
+
+		template <
+		    void (TContextData::*method)(TypedContext<TContextData>&, const redisReply*, std::unique_ptr<TData>&&)>
+		int then() && {
+			return mCtx.sendCommand(
 			    [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
 				    auto& typedContext = *static_cast<TypedContext<TContextData>*>(asyncCtx->data);
-				    std::unique_ptr<TCommandData> commandData{static_cast<TCommandData*>(rawCommandData)};
+				    std::unique_ptr<TData> commandData{static_cast<TData*>(rawCommandData)};
 				    if (const auto customData = typedContext.getCustomData().lock()) {
 					    auto& instance = *customData;
 					    try {
@@ -122,10 +136,18 @@ public:
 					    }
 				    }
 			    },
-			    args, commandData.release());
+			    mArgs, mData.release());
 		}
+
+	private:
+		CommandWithData(Context::Connected& ctx, const RedisArgsPacker& args, std::unique_ptr<TData>&& commandData)
+		    : mCtx(ctx), mArgs(args), mData(std::move(commandData)) {
+		}
+
+		Context::Connected& mCtx;
+		const RedisArgsPacker& mArgs;
+		std::unique_ptr<TData> mData;
 	};
-	static_assert(sizeof(Connected) == sizeof(Context::Connected), "Must be reinterpret_cast-able");
 
 	using State = std::variant<Context::Disconnected, Context::Connecting, Connected, Context::Disconnecting>;
 
