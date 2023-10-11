@@ -83,6 +83,7 @@ add_executable(flexisip_tester
 	tests/eventlogs/events/auth-log-tester.cc
 	tests/eventlogs/events/event-log-stats-tester.cc
 	tests/flexiapi/schemas/iso-8601-date-tester.cc
+	tests/libhiredis-wrapper/redis-async-context-tester.cc
 	tests/presence/presence-pidf-tester.cc
 	tests/presence/presence-publish-tester.cc
 	tests/presence/xsd-utils-tester.cc

@@ -74,6 +74,7 @@ add_library(flexisip SHARED
 	fork-context/fork-status.hh
 	h264iframefilter.cc h264iframefilter.hh
 	lib/nlohmann-json-3-11-2/json.hpp
+	libhiredis-wrapper/redis-async-context.cc libhiredis-wrapper/redis-async-context.hh
 	log/logmanager.cc
 	lpconfig.cc
 	mediarelay.cc mediarelay.hh

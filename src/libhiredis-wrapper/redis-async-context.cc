@@ -4,6 +4,7 @@
 
 #include "redis-async-context.hh"
 
+#include <ostream>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -11,19 +12,21 @@
 
 #include "flexisip/logmanager.hh"
 
+#include "registrardb-redis-sofia-event.h"
 #include "registrardb-redis.hh"
 #include "utils/variant-utils.hh"
 
 namespace flexisip::redis::async {
 
-Context::Context(RedisParameters&& params) : mParams(std::move(params)), mState(Disconnected()) {
+Context::Context(RedisParameters&& params, std::weak_ptr<void>&& customData)
+    : mParams(std::move(params)), mCustomData(std::move(customData)) {
 	std::stringstream prefix{};
 	prefix << "redis::async::Context[" << this << "] - ";
 	mLogPrefix = prefix.str();
 }
 
-const Context::State& Context::connect() {
-	[this]() {
+Context::State& Context::connect(su_root_t* sofiaRoot) {
+	[this, sofiaRoot]() {
 		if (std::get_if<Disconnected>(&mState) == nullptr) {
 			SLOGE << mLogPrefix << "Cannot connect when in state: " << StreamableVariant(mState);
 			return;
@@ -57,6 +60,11 @@ const Context::State& Context::connect() {
 			return;
 		}
 
+		if (REDIS_OK != redisSofiaAttach(ctx.get(), sofiaRoot)) {
+			SLOGE << mLogPrefix << "Failed to hook into Sofia loop";
+			return;
+		}
+
 		mState = Connecting(std::move(ctx));
 	}();
 	return mState;
@@ -83,7 +91,7 @@ void Context::onConnect(const redisAsyncContext*, int status) {
 
 void Context::onDisconnect(const redisAsyncContext* ctx, int status) {
 	if (status != REDIS_OK) {
-		SLOGE << mLogPrefix << "Forcefully disconnecting. Reason: " << ctx->errstr;
+		SLOGW << mLogPrefix << "Forcefully disconnecting. Reason: " << ctx->errstr;
 	}
 	SLOGD << mLogPrefix << "Disconnected (was in state: " << StreamableVariant(mState) << ")";
 	mState = Disconnected();
@@ -97,8 +105,41 @@ Context::Disconnecting::Disconnecting(Connected&& prev) {
 	redisAsyncDisconnect(prev.mCtx.release());
 }
 
-int Context::Connected::sendCommand(redisCallbackFn* fn, void* privdata, RedisArgsPacker& args) {
-	return redisAsyncCommandArgv(mCtx.get(), fn, privdata, args.getArgCount(), args.getCArgs(), args.getArgSizes());
+int Context::Connected::sendCommand(redisCallbackFn* fn, const RedisArgsPacker& args, void* privdata) {
+	return redisAsyncCommandArgv(
+	    mCtx.get(), fn, privdata, args.getArgCount(),
+	    // This const char** signature supposedly suggests that while the array itself is const, its elements are not.
+	    // But I don't see a reason the args would be modified by this function, so I assume this is just a mistake.
+	    const_cast<const char**>(args.getCArgs()), args.getArgSizes());
+}
+
+Context::State& Context::getState() {
+	return mState;
+}
+const std::weak_ptr<void>& Context::getCustomData() const {
+	return mCustomData;
+}
+
+std::ostream& operator<<(std::ostream& stream, const Context::Disconnected&) {
+	return stream << "Disconnected()";
+}
+std::ostream& operator<<(std::ostream& stream, const Context::Connecting& connecting) {
+	return stream << "Connecting(ctx: " << connecting.mCtx.get() << ")";
+}
+std::ostream& operator<<(std::ostream& stream, const Context::Connected& connected) {
+	return stream << "Connected(ctx: " << connected.mCtx.get() << ")";
+}
+std::ostream& operator<<(std::ostream& stream, const Context::Disconnecting&) {
+	return stream << "Disconnecting()";
+}
+
+void Context::ContextDeleter::operator()(redisAsyncContext* ctx) noexcept {
+	if (ctx->c.flags & REDIS_FREEING) {
+		// We're in a callback, the context is already being freed
+		return;
+	}
+
+	redisAsyncFree(ctx);
 }
 
 } // namespace flexisip::redis::async

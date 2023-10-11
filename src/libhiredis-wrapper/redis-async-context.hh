@@ -4,10 +4,15 @@
 
 #pragma once
 
+#include <cstddef>
+#include <exception>
+#include <memory>
 #include <string_view>
+#include <utility>
 #include <variant>
 
 #include "compat/hiredis/async.h"
+#include "sofia-sip/su_wait.h"
 
 #include "flexisip/sofia-wrapper/waker.hh"
 
@@ -38,12 +43,7 @@ private:
 class Context {
 public:
 	struct ContextDeleter {
-		void operator()(redisAsyncContext* ctx) noexcept {
-			// This is safe to call from within a callback. The actual freeing will not take place immediately.
-			// So this won't do any harm, even when hiredis plans to free the context at the end of the callback anyway
-			// (e.g. on a  failed connection attempt)
-			redisAsyncFree(ctx);
-		}
+		void operator()(redisAsyncContext*) noexcept;
 	};
 	using ContextPtr = std::unique_ptr<redisAsyncContext, ContextDeleter>;
 
@@ -65,9 +65,10 @@ public:
 		friend class Context;
 		friend std::ostream& operator<<(std::ostream&, const Connected&);
 
-	private:
-		int sendCommand(redisCallbackFn* fn, void* privdata, RedisArgsPacker& args);
+	protected:
+		int sendCommand(redisCallbackFn* fn, const RedisArgsPacker& args, void* privdata);
 
+	private:
 		explicit Connected(Connecting&&);
 		ContextPtr mCtx;
 	};
@@ -81,19 +82,70 @@ public:
 
 	using State = std::variant<Disconnected, Connecting, Connected, Disconnecting>;
 
-	Context(RedisParameters&&);
-	~Context();
+	Context(RedisParameters&&, std::weak_ptr<void>&& customData);
 
-	const State& getState() const;
-	const State& connect();
+	State& getState();
+	const std::weak_ptr<void>& getCustomData() const;
+	State& connect(su_root_t*);
 
 private:
 	void onConnect(const redisAsyncContext*, int status);
 	void onDisconnect(const redisAsyncContext*, int status);
 
+	std::string mLogPrefix{};
 	RedisParameters mParams{};
+	std::weak_ptr<void> mCustomData;
+	// Must be the last member of self, such that it is deleted first,  redisAsyncFree
 	State mState{Disconnected()};
-	std::string mLogPrefix;
 };
+
+template <typename TContextData>
+class TypedContext {
+public:
+	class Connected : Context::Connected {
+	public:
+		template <typename TCommandData,
+		          void (TContextData::*method)(
+		              TypedContext<TContextData>&, const redisReply*, std::unique_ptr<TCommandData>&&)>
+		int sendCommand(const RedisArgsPacker& args, std::unique_ptr<TCommandData>&& commandData) {
+			return Context::Connected::sendCommand(
+			    [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
+				    auto& typedContext = *static_cast<TypedContext<TContextData>*>(asyncCtx->data);
+				    std::unique_ptr<TCommandData> commandData{static_cast<TCommandData*>(rawCommandData)};
+				    if (const auto customData = typedContext.getCustomData().lock()) {
+					    auto& instance = *customData;
+					    try {
+						    (instance.*method)(typedContext, static_cast<const redisReply*>(reply),
+						                       std::move(commandData));
+					    } catch (std::exception& exc) {
+						    SLOGE << "Unhandled exception in Redis callback: " << exc.what();
+					    }
+				    }
+			    },
+			    args, commandData.release());
+		}
+	};
+	static_assert(sizeof(Connected) == sizeof(Context::Connected), "Must be reinterpret_cast-able");
+
+	using State = std::variant<Context::Disconnected, Context::Connecting, Connected, Context::Disconnecting>;
+
+	TypedContext(RedisParameters&& params, std::weak_ptr<TContextData>&& customData)
+	    : mContext(std::move(params), std::move(customData)) {
+	}
+
+	State& getState() {
+		return reinterpret_cast<State&>(mContext.getState());
+	}
+	const std::weak_ptr<TContextData>& getCustomData() const {
+		return reinterpret_cast<const std::weak_ptr<TContextData>&>(mContext.getCustomData());
+	}
+	State& connect(su_root_t* sofiaRoot) {
+		return reinterpret_cast<State&>(mContext.connect(sofiaRoot));
+	}
+
+private:
+	Context mContext;
+};
+static_assert(sizeof(TypedContext<std::string>) == sizeof(Context), "Must be reinterpret_cast-able");
 
 } // namespace flexisip::redis::async

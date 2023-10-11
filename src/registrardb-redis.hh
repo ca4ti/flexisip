@@ -150,10 +150,10 @@ public:
 	void addFieldName(const std::string& fieldName) {
 		addArg(fieldName);
 	}
-	const char** getCArgs() {
+	const char* const* getCArgs() const {
 		return &mCArgs[0];
 	}
-	const size_t* getArgSizes() {
+	const size_t* getArgSizes() const {
 		return &mArgsSize[0];
 	}
 	size_t getArgCount() const {
@@ -281,7 +281,8 @@ private:
 	void onTryReconnectTimer();
 
 	redisAsyncContext* mContext{nullptr};
-	// Why do we need a second context?? Why don't we issue the subscribe commands through the main context? Why initiate (and manage) 2 connections to the same server?
+	// Why do we need a second context?? Why don't we issue the subscribe commands through the main context? Why
+	// initiate (and manage) 2 connections to the same server?
 	redisAsyncContext* mSubscribeContext{nullptr};
 	RecordSerializer* mSerializer;
 	RedisParameters mParams{};

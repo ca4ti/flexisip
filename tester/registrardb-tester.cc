@@ -652,29 +652,9 @@ tuple<map<string, string>, FailureExpected> aclAuth(RedisSyncContext& redis) {
 	        failureExpected};
 }
 
-class A {
-public:
-	void print() {
-		SLOGD << "BEDUG " << data;
-	}
-
-	std::string data;
-};
-
-template <typename T, void (T::*method)()>
-void callMethod(T* instance) {
-	(instance->*method)();
-}
-
-void templatePlayground() {
-	A a{.data = "it works!"};
-	callMethod<A, &A::print>(&a);
-}
-
 TestSuite
     _("RegistrarDB",
       {
-          CLASSY_TEST(templatePlayground),
           CLASSY_TEST(InstanceIDFeatureParamIsSerializedToRedis),
           CLASSY_TEST(CallIDsPreviouslyUsedAsKeysAreInterpretedAsUniqueIDs),
           CLASSY_TEST(authenticatedConnectionWithRedis<legacyAuth>),
