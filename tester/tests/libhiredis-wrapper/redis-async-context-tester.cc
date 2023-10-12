@@ -28,9 +28,7 @@ class TestRedisClient {
 public:
 	bool mReplyReceived = false;
 
-	void onHGETALL(redis::async::TypedContext<TestRedisClient>&,
-	               const redisReply* reply,
-	               std::unique_ptr<std::nullptr_t>&&) {
+	void onHGETALL(redis::async::TypedContext<TestRedisClient>&, const redisReply* reply, std::nullptr_t&&) {
 		BC_HARD_ASSERT_TRUE(reply != nullptr);
 		if (reply->type == REDIS_REPLY_ERROR) {
 			BC_HARD_FAIL(reply->str);
@@ -55,7 +53,7 @@ void test() {
 	    1, [&context]() { return std::holds_alternative<decltype(context)::Connected>(context.getState()); }));
 
 	auto& ready = std::get<decltype(context)::Connected>(context.getState());
-	ready.command({"HGETALL", "*"}).then<&TestRedisClient::onHGETALL>();
+	ready.command<std::nullptr_t>({"HGETALL", "*"}).then<&TestRedisClient::onHGETALL>();
 
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&replyReceived = handler->mReplyReceived]() { return replyReceived; }));
 }

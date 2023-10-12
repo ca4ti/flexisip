@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <exception>
 #include <memory>
@@ -110,10 +111,9 @@ public:
 
 	class Connected : Context::Connected {
 	public:
-		template <typename TCommandData = std::nullptr_t>
-		CommandWithData<TCommandData> command(const RedisArgsPacker& args,
-		                                      std::unique_ptr<TCommandData>&& commandData = nullptr) {
-			return CommandWithData<TCommandData>(*this, args, std::move(commandData));
+		template <typename TCommandData = void, typename... DataArgs>
+		CommandWithData<TCommandData> command(const RedisArgsPacker& args, DataArgs&&... dataArgs) {
+			return CommandWithData<TCommandData>(*this, args, std::forward<DataArgs>(dataArgs)...);
 		}
 	};
 	static_assert(sizeof(Connected) == sizeof(Context::Connected), "Must be reinterpret_cast-able");
@@ -123,35 +123,61 @@ public:
 	public:
 		friend class Connected;
 
-		template <
-		    void (TContextData::*method)(TypedContext<TContextData>&, const redisReply*, std::unique_ptr<TData>&&)>
+		class CommandContext {
+		public:
+			friend class CommandWithData;
+
+		private:
+			template <typename... Args>
+			CommandContext(std::string&& commandStr, Args&&... args)
+			    : mCommand(commandStr), mStarted(std::chrono::system_clock::now()), mData(std::forward<Args>(args)...) {
+			}
+
+			const std::string mCommand;
+			const std::chrono::time_point<std::chrono::system_clock> mStarted;
+			TData mData;
+		};
+
+		using TMethod = void (TContextData::*)(TypedContext<TContextData>&, const redisReply*, TData&&);
+
+		template <TMethod method>
 		int then() && {
+			using namespace std::chrono_literals;
+
 			return mCtx.sendCommand(
 			    [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
+				    std::unique_ptr<CommandContext> commandContext{static_cast<CommandContext*>(rawCommandData)};
+				    const auto wallClockTime = std::chrono::system_clock::now() - commandContext->mStarted;
+				    (wallClockTime < 1s ? SLOGD : SLOGW)
+				        << "Redis command completed in "
+				        << std::chrono::duration_cast<std::chrono::milliseconds>(wallClockTime).count()
+				        << "ms (wall-clock time):\n\t" << commandContext->mCommand;
+
 				    auto& typedContext = *static_cast<TypedContext<TContextData>*>(asyncCtx->data);
-				    std::unique_ptr<TData> commandData{static_cast<TData*>(rawCommandData)};
 				    if (const auto customData = typedContext.getCustomData().lock()) {
 					    auto& instance = *customData;
 					    try {
 						    (instance.*method)(typedContext, static_cast<const redisReply*>(reply),
-						                       std::move(commandData));
+						                       std::forward<TData>(commandContext->mData));
 					    } catch (std::exception& exc) {
 						    SLOGE << typedContext.mContext.mLogPrefix
 						          << "Unhandled exception in callback: " << exc.what();
 					    }
 				    }
 			    },
-			    mArgs, mData.release());
+			    mArgs, mContext.release());
 		}
 
 	private:
-		CommandWithData(Context::Connected& ctx, const RedisArgsPacker& args, std::unique_ptr<TData>&& commandData)
-		    : mCtx(ctx), mArgs(args), mData(std::move(commandData)) {
+		template <typename... DataArgs>
+		CommandWithData(Context::Connected& ctx, const RedisArgsPacker& redisArgs, DataArgs&&... dataArgs)
+		    : mCtx(ctx), mArgs(redisArgs),
+		      mContext(new CommandContext(redisArgs.toString(), std::forward<DataArgs>(dataArgs)...)) {
 		}
 
 		Context::Connected& mCtx;
 		const RedisArgsPacker& mArgs;
-		std::unique_ptr<TData> mData;
+		std::unique_ptr<CommandContext> mContext;
 	};
 
 	using State = std::variant<Context::Disconnected, Context::Connecting, Connected, Context::Disconnecting>;
