@@ -21,7 +21,7 @@
 #include "flexisip/registrar/registar-listeners.hh"
 
 #include "presence-longterm.hh"
-#include "presentity-presenceinformation.hh"
+#include "presence/presentity/presentity-presence-information.hh"
 #include "registrar/extended-contact.hh"
 #include "registrar/record.hh"
 #include "registrar/registrar-db.hh"

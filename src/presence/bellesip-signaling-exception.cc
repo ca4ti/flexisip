@@ -18,7 +18,7 @@
 
 #include "bellesip-signaling-exception.hh"
 
-#include "belle-sip/belle-sip.h"
+#include <belle-sip/belle-sip.h>
 
 namespace flexisip {
 

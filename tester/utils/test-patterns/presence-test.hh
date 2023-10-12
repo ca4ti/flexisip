@@ -23,7 +23,7 @@
 #include "flexisip/configmanager.hh"
 
 #include "agent.hh"
-#include "presence/presence-longterm.hh"
+#include "presence/observers/presence-longterm.hh"
 #include "presence/presence-server.hh"
 #include "registrardb-test.hh"
 #include "tester.hh"
@@ -72,8 +72,7 @@ protected:
 	void onAgentConfigured() override {
 		RegistrarDbTest::onAgentConfigured();
 		mPresence = std::make_shared<PresenceServer>(mRoot);
-		auto presenceLongTerm = std::make_shared<flexisip::PresenceLongterm>(mPresence->getBelleSipMainLoop());
-		mPresence->addPresenceInfoObserver(presenceLongTerm);
+		mPresence->enableLongTermPresence();
 	}
 
 	// Protected attributes

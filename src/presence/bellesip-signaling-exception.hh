@@ -20,9 +20,9 @@
 
 #include <list>
 
-#include "utils/signaling-exception.hh"
+#include <belle-sip/belle-sip.h>
 
-typedef struct _belle_sip_header belle_sip_header_t;
+#include "utils/signaling-exception.hh"
 
 namespace flexisip {
 

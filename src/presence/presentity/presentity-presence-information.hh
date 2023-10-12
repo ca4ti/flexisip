@@ -19,112 +19,27 @@
 #pragma once
 
 #include "compat/optional.hh"
+#include <chrono>
 #include <list>
 #include <map>
 
-#include <flexisip/flexisip-exception.hh>
+#include <belle-sip/belle-sip.h>
 
+#include "flexisip/flexisip-exception.hh"
+
+#include "presence/belle-sip-using.hh"
 #include "xml/pidf+xml.hh"
 
-typedef struct _belle_sip_uri belle_sip_uri_t;
-typedef struct belle_sip_source belle_sip_source_t;
-typedef struct belle_sip_main_loop belle_sip_main_loop_t;
 namespace flexisip {
 
-/* Special deleter for belle_sip_source_t objects that cancels the timer in addition of
-   decrementing the refcounter */
-struct BelleSipSourceCancelingDeleter {
-	constexpr BelleSipSourceCancelingDeleter() noexcept = default;
-	constexpr BelleSipSourceCancelingDeleter(BelleSipObjectDeleter<belle_sip_source_t>&&) noexcept {
-	}
-	void operator()(belle_sip_source_t* source) noexcept {
-		belle_sip_source_cancel(source);
-		belle_sip_object_unref(source);
-	}
-};
-
 class PresentityManager;
-class PresenceInformationElement {
-public:
-	/* Re-definition of BelleSipSourcePtr in order to use BelleSipSourceCancelingDeleter as deleter */
-	using BelleSipSourcePtr = std::unique_ptr<belle_sip_source_t, BelleSipSourceCancelingDeleter>;
+class PresenceInformationElement;
+class PresentityPresenceInformationListener;
 
-	PresenceInformationElement(Xsd::Pidf::Presence::TupleSequence* tuples,
-	                           Xsd::DataModel::Person* person,
-	                           belle_sip_main_loop_t* mainLoop);
-	// create an information element with a default tuple set to open.
-	PresenceInformationElement(const belle_sip_uri_t* contact);
-	~PresenceInformationElement();
-
-	time_t getExpitationTime() const;
-
-	template <typename T>
-	void setExpiresTimer(T&& timer) {
-		mTimer = std::forward<T>(timer);
-	}
-
-	const std::unique_ptr<Xsd::Pidf::Tuple>& getTuple(const std::string& id) const;
-	const std::list<std::unique_ptr<Xsd::Pidf::Tuple>>& getTuples() const;
-	const Xsd::DataModel::Person getPerson() const;
-	// void addTuple(pidf::Tuple*);
-	// void removeTuple(pidf::Tuple*);
-	void clearTuples();
-	const std::string& getEtag();
-	void setEtag(const std::string& eTag);
-
-private:
-	std::list<std::unique_ptr<Xsd::Pidf::Tuple>> mTuples;
-	Xsd::DataModel::Person mPerson{""};
-	Xsd::XmlSchema::dom::unique_ptr<xercesc::DOMDocument> mDomDocument; // needed to store extension nodes
-	belle_sip_main_loop_t* mBelleSipMainloop = nullptr;
-	BelleSipSourcePtr mTimer;
-	std::string mEtag;
-};
-/*
- * Presence Information is the key class representy a presentity. This class can be either created by a Publish for a
- presentiry or by a Subscription to a presentity
-
+/**
+ * Presence Information is the key class representing a presentity. This class can be either created by a Publish for a
+ * presentity or by a Subscription to a presentity
  */
-
-class PresentityPresenceInformation;
-
-class PresentityPresenceInformationListener {
-public:
-	/* Re-definition of BelleSipSourcePtr in order to use BelleSipSourceCancelingDeleter as deleter */
-	using BelleSipSourcePtr = std::unique_ptr<belle_sip_source_t, BelleSipSourceCancelingDeleter>;
-
-	PresentityPresenceInformationListener() = default;
-	virtual ~PresentityPresenceInformationListener() = default;
-
-	template <typename T>
-	void setExpiresTimer(belle_sip_main_loop_t* ml, T&& timer) {
-		mBelleSipMainloop = ml;
-		mTimer = std::forward<T>(timer);
-	}
-
-	void enableExtendedNotify(bool enable);
-	bool extendedNotifyEnabled();
-	void enableBypass(bool enable);
-	bool bypassEnabled();
-	/*returns prsentity uri associated to this Listener*/
-	virtual const belle_sip_uri_t* getPresentityUri() const = 0;
-	virtual std::string getName() const {
-		return "";
-	}
-	/*invoked on changes*/
-	virtual void onInformationChanged(PresentityPresenceInformation& presenceInformation, bool extended) = 0;
-	/*invoked on expiration*/
-	virtual void onExpired(PresentityPresenceInformation& presenceInformation) = 0;
-	virtual const belle_sip_uri_t* getFrom() = 0;
-	virtual const belle_sip_uri_t* getTo() = 0;
-
-private:
-	belle_sip_main_loop_t* mBelleSipMainloop = nullptr;
-	BelleSipSourcePtr mTimer;
-	bool mExtendedNotify = false;
-	bool mBypassEnabled = false;
-};
-
 class PresentityPresenceInformation : public std::enable_shared_from_this<PresentityPresenceInformation> {
 
 public:
@@ -139,7 +54,7 @@ public:
 	 * */
 	std::string putTuples(Xsd::Pidf::Presence::TupleSequence& tuples, Xsd::DataModel::Person& person, int expires);
 
-	void setDefaultElement(const char* contact = NULL);
+	void setDefaultElement(const char* contact = nullptr);
 
 	/*
 	 *
@@ -157,13 +72,14 @@ public:
 	 * */
 	std::string updateTuples(Xsd::Pidf::Presence::TupleSequence& tuples,
 	                         Xsd::DataModel::Person& person,
-	                         std::string& eTag,
+	                         const std::string& eTag,
 	                         int expires);
 
-	/*
-	 * refresh a publish
+	/**
+	 * Refresh a publish
 	 * @return new eTag
-	 * */
+	 *
+	 */
 	std::string refreshTuplesForEtag(const std::string& eTag, int expires);
 
 	/*
@@ -238,8 +154,8 @@ private:
 	 * tuples may be null
 	 */
 	std::string setOrUpdate(Xsd::Pidf::Presence::TupleSequence* tuples,
-	                        Xsd::DataModel::Person*,
-	                        const std::string* eTag,
+	                        Xsd::DataModel::Person* person,
+	                        std::optional<const std::string> eTag,
 	                        int expires);
 
 	/*
