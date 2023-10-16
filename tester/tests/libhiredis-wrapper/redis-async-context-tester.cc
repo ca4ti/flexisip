@@ -5,6 +5,7 @@
 #include "libhiredis-wrapper/redis-async-context.hh"
 
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <variant>
@@ -26,16 +27,27 @@ namespace flexisip::tester {
 
 class TestRedisClient {
 public:
-	bool mReplyReceived = false;
+	std::uint8_t mReplyReceived = 0;
 
-	void onHGETALL(redis::async::SessionWith<TestRedisClient>&, const redisReply* reply) {
+	void onHGETALLWithData(redis::async::SessionWith<TestRedisClient>&, const redisReply* reply, int&& data) {
 		BC_HARD_ASSERT_TRUE(reply != nullptr);
 		if (reply->type == REDIS_REPLY_ERROR) {
 			BC_HARD_FAIL(reply->str);
 		}
 		BC_HARD_ASSERT_CPP_EQUAL(reply->type, REDIS_REPLY_ARRAY);
 		BC_ASSERT_CPP_EQUAL(reply->len, 0);
-		mReplyReceived = true;
+		BC_ASSERT_CPP_EQUAL(data, 34);
+		mReplyReceived++;
+	}
+
+	void onHGETALLWithoutData(redis::async::SessionWith<TestRedisClient>&, const redisReply* reply) {
+		BC_HARD_ASSERT_TRUE(reply != nullptr);
+		if (reply->type == REDIS_REPLY_ERROR) {
+			BC_HARD_FAIL(reply->str);
+		}
+		BC_HARD_ASSERT_CPP_EQUAL(reply->type, REDIS_REPLY_ARRAY);
+		BC_ASSERT_CPP_EQUAL(reply->len, 0);
+		mReplyReceived++;
 	}
 };
 
@@ -53,9 +65,12 @@ void test() {
 	    1, [&context]() { return std::holds_alternative<decltype(context)::Connected>(context.getState()); }));
 
 	auto& ready = std::get<decltype(context)::Connected>(context.getState());
-	ready.command({"HGETALL", "*"}).then<&TestRedisClient::onHGETALL>();
+	ready.command({"HGETALL", "*"}).with<int>(34).then<&TestRedisClient::onHGETALLWithData>();
 
-	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&replyReceived = handler->mReplyReceived]() { return replyReceived; }));
+	ready.command({"HGETALL", "*"}).then<&TestRedisClient::onHGETALLWithoutData>();
+
+	BC_ASSERT_TRUE(
+	    asserter.iterateUpTo(1, [&replyReceived = handler->mReplyReceived]() { return 2 <= replyReceived; }));
 }
 
 namespace {

@@ -109,6 +109,7 @@ template <typename TContextData, typename TData>
 class CommandContext {
 public:
 	friend class Command;
+	friend class SessionWith<TContextData>;
 
 	using TMethod = void (TContextData::*)(SessionWith<TContextData>&, const redisReply*, TData&&);
 
@@ -131,7 +132,7 @@ private:
 template <typename TContextData>
 class CommandContext<TContextData, void> {
 public:
-	friend class SessionWith<TContextData>::Command;
+	friend class SessionWith<TContextData>;
 
 	using TMethod = void (TContextData::*)(SessionWith<TContextData>&, const redisReply*);
 
@@ -161,24 +162,25 @@ public:
 		Command command(const RedisArgsPacker& args) {
 			return Command(*this, args);
 		}
-
-		template <typename TCommandData, typename... DataArgs>
-		CommandWithData<TCommandData> command(const RedisArgsPacker& args, DataArgs&&... dataArgs) {
-			return CommandWithData<TCommandData>(*this, args, std::forward<DataArgs>(dataArgs)...);
-		}
 	};
 	static_assert(sizeof(Connected) == sizeof(Session::Connected), "Must be reinterpret_cast-able");
 
 	class Command {
 	public:
 		friend class Connected;
+		template <typename TData>
+		friend class CommandWithData;
 
 		using Context = CommandContext<TContextData, void>;
 
 		template <typename Context::TMethod method>
 		int then() && {
-			return std::move(*this).template send<Context, method>(
-			    std::unique_ptr<Context>(new Context(mArgs.toString())));
+			return std::move(*this).template with<void>().template then<method>();
+		}
+
+		template <typename TData, typename... Args>
+		CommandWithData<TData> with(Args&&... args) && {
+			return CommandWithData<TData>(std::move(*this), std::forward<Args>(args)...);
 		}
 
 	private:
@@ -220,62 +222,24 @@ public:
 	class CommandWithData {
 	public:
 		friend class Connected;
+		friend class Command;
 
-		class CommandContext {
-		public:
-			friend class CommandWithData;
+		using Context = CommandContext<TContextData, TData>;
 
-		private:
-			template <typename... Args>
-			CommandContext(std::string&& commandStr, Args&&... args)
-			    : mCommand(commandStr), mStarted(std::chrono::system_clock::now()), mData(std::forward<Args>(args)...) {
-			}
-
-			const std::string mCommand;
-			const std::chrono::time_point<std::chrono::system_clock> mStarted;
-			TData mData;
-		};
-
-		using TMethod = void (TContextData::*)(SessionWith<TContextData>&, const redisReply*, TData&&);
-
-		template <TMethod method>
+		template <typename Context::TMethod method>
 		int then() && {
-			using namespace std::chrono_literals;
-
-			return mCtx.sendCommand(
-			    [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
-				    std::unique_ptr<CommandContext> commandContext{static_cast<CommandContext*>(rawCommandData)};
-				    const auto wallClockTime = std::chrono::system_clock::now() - commandContext->mStarted;
-				    (wallClockTime < 1s ? SLOGD : SLOGW)
-				        << "Redis command completed in "
-				        << std::chrono::duration_cast<std::chrono::milliseconds>(wallClockTime).count()
-				        << "ms (wall-clock time):\n\t" << commandContext->mCommand;
-
-				    auto& typedContext = *static_cast<SessionWith<TContextData>*>(asyncCtx->data);
-				    if (const auto customData = typedContext.getCustomData().lock()) {
-					    auto& instance = *customData;
-					    try {
-						    (instance.*method)(typedContext, static_cast<const redisReply*>(reply),
-						                       std::forward<TData>(commandContext->mData));
-					    } catch (std::exception& exc) {
-						    SLOGE << typedContext.mContext.mLogPrefix
-						          << "Unhandled exception in callback: " << exc.what();
-					    }
-				    }
-			    },
-			    mArgs, mContext.release());
+			return std::move(mWrapped).template send<Context, method>(std::move(mContext));
 		}
 
 	private:
 		template <typename... DataArgs>
-		CommandWithData(Session::Connected& ctx, const RedisArgsPacker& redisArgs, DataArgs&&... dataArgs)
-		    : mCtx(ctx), mArgs(redisArgs),
-		      mContext(new CommandContext(redisArgs.toString(), std::forward<DataArgs>(dataArgs)...)) {
+		CommandWithData(Command&& wrapped, DataArgs&&... dataArgs)
+		    : mWrapped(std::move(wrapped)),
+		      mContext(new Context(mWrapped.mArgs.toString(), std::forward<DataArgs>(dataArgs)...)) {
 		}
 
-		Session::Connected& mCtx;
-		const RedisArgsPacker& mArgs;
-		std::unique_ptr<CommandContext> mContext;
+		Command mWrapped;
+		std::unique_ptr<Context> mContext;
 	};
 
 	using State = std::variant<Session::Disconnected, Session::Connecting, Connected, Session::Disconnecting>;
