@@ -102,32 +102,12 @@ private:
 	// synchronously, which still needs access to the rest of self.
 	State mState{Disconnected()};
 };
+
 template <typename TContextData>
 class SessionWith;
 
 template <typename TContextData, typename TData>
-class CommandContext {
-public:
-	friend class Command;
-	friend class SessionWith<TContextData>;
-
-	using TMethod = void (TContextData::*)(SessionWith<TContextData>&, const redisReply*, TData&&);
-
-	template <TMethod method>
-	void callMethod(TContextData& instance, SessionWith<TContextData>& sessionContext, const redisReply* reply) {
-		(instance.*method)(sessionContext, reply, std::move(mData));
-	}
-
-private:
-	template <typename... Args>
-	CommandContext(std::string&& commandStr, Args&&... args)
-	    : mCommand(commandStr), mStarted(std::chrono::system_clock::now()), mData(std::forward<Args>(args)...) {
-	}
-
-	const std::string mCommand;
-	const std::chrono::time_point<std::chrono::system_clock> mStarted;
-	TData mData;
-};
+class CommandContext;
 
 template <typename TContextData>
 class CommandContext<TContextData, void> {
@@ -141,7 +121,7 @@ public:
 		(instance.*method)(sessionContext, reply);
 	}
 
-private:
+protected:
 	template <typename... Args>
 	CommandContext(std::string&& commandStr) : mCommand(commandStr), mStarted(std::chrono::system_clock::now()) {
 	}
@@ -150,7 +130,28 @@ private:
 	const std::chrono::time_point<std::chrono::system_clock> mStarted;
 };
 
-template <typename TContextData>
+template <typename TContextData, typename TData>
+class CommandContext : CommandContext<TContextData, void> {
+public:
+	friend class SessionWith<TContextData>;
+
+	using TMethod = void (TContextData::*)(SessionWith<TContextData>&, const redisReply*, TData&&);
+
+	template <TMethod method>
+	void callMethod(TContextData& instance, SessionWith<TContextData>& sessionContext, const redisReply* reply) {
+		(instance.*method)(sessionContext, reply, std::move(mData));
+	}
+
+private:
+	template <typename... Args>
+	CommandContext(std::string&& commandStr, Args&&... args)
+	    : CommandContext<TContextData, void>(std::move(commandStr)), mData(std::forward<Args>(args)...) {
+	}
+
+	TData mData;
+};
+
+template <typename TSessionData>
 class SessionWith {
 public:
 	template <typename TData>
@@ -171,7 +172,7 @@ public:
 		template <typename TData>
 		friend class CommandWithData;
 
-		using Context = CommandContext<TContextData, void>;
+		using Context = CommandContext<TSessionData, void>;
 
 		template <typename Context::TMethod method>
 		int then() && {
@@ -197,7 +198,7 @@ public:
 				        << std::chrono::duration_cast<std::chrono::milliseconds>(wallClockTime).count()
 				        << "ms (wall-clock time):\n\t" << commandContext->mCommand;
 
-				    auto& typedContext = *static_cast<SessionWith<TContextData>*>(asyncCtx->data);
+				    auto& typedContext = *static_cast<SessionWith<TSessionData>*>(asyncCtx->data);
 				    if (const auto customData = typedContext.getCustomData().lock()) {
 					    try {
 						    commandContext->template callMethod<method>(*customData, typedContext,
@@ -221,10 +222,9 @@ public:
 	template <typename TData>
 	class CommandWithData {
 	public:
-		friend class Connected;
 		friend class Command;
 
-		using Context = CommandContext<TContextData, TData>;
+		using Context = CommandContext<TSessionData, TData>;
 
 		template <typename Context::TMethod method>
 		int then() && {
@@ -244,15 +244,15 @@ public:
 
 	using State = std::variant<Session::Disconnected, Session::Connecting, Connected, Session::Disconnecting>;
 
-	SessionWith(RedisParameters&& params, std::weak_ptr<TContextData>&& customData)
+	SessionWith(RedisParameters&& params, std::weak_ptr<TSessionData>&& customData)
 	    : mContext(std::move(params), std::move(customData)) {
 	}
 
 	State& getState() {
 		return reinterpret_cast<State&>(mContext.getState());
 	}
-	const std::weak_ptr<TContextData>& getCustomData() const {
-		return reinterpret_cast<const std::weak_ptr<TContextData>&>(mContext.getCustomData());
+	const std::weak_ptr<TSessionData>& getCustomData() const {
+		return reinterpret_cast<const std::weak_ptr<TSessionData>&>(mContext.getCustomData());
 	}
 	State& connect(su_root_t* sofiaRoot) {
 		return reinterpret_cast<State&>(mContext.connect(sofiaRoot));
