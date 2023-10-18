@@ -104,7 +104,7 @@ private:
 	State mState{Disconnected()};
 };
 
-template <typename TContextData>
+template <typename TSessionData>
 class SessionWith;
 
 template <typename TContextData, typename TData>

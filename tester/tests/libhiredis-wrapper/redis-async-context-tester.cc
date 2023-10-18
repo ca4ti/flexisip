@@ -29,7 +29,7 @@ class TestRedisClient {
 public:
 	std::uint8_t mReplyReceived = 0;
 
-	void onHGETALLWithData(redis::async::SessionWith<TestRedisClient>&, const redisReply* reply, int&& data) {
+	void onHGETALLWithData(redis::async::SessionWith<TestRedisClient>& session, const redisReply* reply, int&& data) {
 		BC_HARD_ASSERT_TRUE(reply != nullptr);
 		if (reply->type == REDIS_REPLY_ERROR) {
 			BC_HARD_FAIL(reply->str);
@@ -56,15 +56,15 @@ void test() {
 	sofiasip::SuRoot root{};
 	CoreAssert asserter{root};
 	const auto handler = std::make_shared<TestRedisClient>();
-	redis::async::SessionWith<TestRedisClient> context({.domain = "localhost", .port = redis.port()}, handler);
-	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(context.getState()));
+	redis::async::SessionWith<TestRedisClient> session({.domain = "localhost", .port = redis.port()}, handler);
+	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(session.getState()));
 
-	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connecting>(context.connect(root.getCPtr())));
+	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connecting>(session.connect(root.getCPtr())));
 
 	BC_HARD_ASSERT_TRUE(asserter.iterateUpTo(
-	    1, [&context]() { return std::holds_alternative<decltype(context)::Connected>(context.getState()); }));
+	    1, [&session]() { return std::holds_alternative<decltype(session)::Connected>(session.getState()); }));
 
-	auto& ready = std::get<decltype(context)::Connected>(context.getState());
+	auto& ready = std::get<decltype(session)::Connected>(session.getState());
 	ready.command({"HGETALL", "*"}).with<int>(34).then<&TestRedisClient::onHGETALLWithData>();
 
 	ready.command({"HGETALL", "*"}).then<&TestRedisClient::onHGETALLWithoutData>();
