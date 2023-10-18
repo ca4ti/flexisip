@@ -13,6 +13,7 @@
 #include <variant>
 
 #include "compat/hiredis/async.h"
+#include "hiredis.h"
 #include "sofia-sip/su_wait.h"
 
 #include "flexisip/sofia-wrapper/waker.hh"
@@ -198,16 +199,9 @@ public:
 				        << std::chrono::duration_cast<std::chrono::milliseconds>(wallClockTime).count()
 				        << "ms (wall-clock time):\n\t" << commandContext->mCommand;
 
-				    auto& typedContext = *static_cast<SessionWith<TSessionData>*>(asyncCtx->data);
-				    if (const auto customData = typedContext.getCustomData().lock()) {
-					    try {
-						    commandContext->template callMethod<method>(*customData, typedContext,
-						                                                static_cast<const redisReply*>(reply));
-					    } catch (std::exception& exc) {
-						    SLOGE << typedContext.mContext.mLogPrefix
-						          << "Unhandled exception in callback: " << exc.what();
-					    }
-				    }
+				    auto& typedSession = *static_cast<SessionWith<TSessionData>*>(asyncCtx->data);
+				    typedSession.template callMethod<TContext, method>(*commandContext,
+				                                                       static_cast<const redisReply*>(reply));
 			    },
 			    mArgs, commandCtx.release());
 		}
@@ -259,6 +253,17 @@ public:
 	}
 
 private:
+	template <typename TContext, typename TContext::TMethod method>
+	void callMethod(TContext& commandContext, const redisReply* reply) {
+		if (const auto customData = getCustomData().lock()) {
+			try {
+				commandContext.template callMethod<method>(*customData, *this, reply);
+			} catch (std::exception& exc) {
+				SLOGE << mContext.mLogPrefix << "Unhandled exception in callback: " << exc.what();
+			}
+		}
+	}
+
 	Session mContext;
 };
 static_assert(sizeof(SessionWith<std::string>) == sizeof(Session), "Must be reinterpret_cast-able");
