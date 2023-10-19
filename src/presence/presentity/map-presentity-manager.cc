@@ -83,8 +83,8 @@ void MapPresentityManager::addOrUpdateListener(shared_ptr<PresentityPresenceInfo
 
 	if (!presenceInfo) {
 		/*no information available yet, but creating entry to be able to register subscribers*/
-		presenceInfo = make_shared<PresentityPresenceInformation>(listener->getPresentityUri(), *this,
-		                                                          belle_sip_stack_get_main_loop(getStack()));
+		presenceInfo = PresentityPresenceInformation::make(listener->getPresentityUri(), *this,
+		                                                   belle_sip_stack_get_main_loop(getStack()));
 		SLOGD << "New Presentity [" << *presenceInfo << "] created from SUBSCRIBE";
 		addPresenceInfo(presenceInfo);
 	}
@@ -121,8 +121,8 @@ void MapPresentityManager::addOrUpdateListeners(list<shared_ptr<PresentityPresen
 		auto presenceInfo = getPresenceInfo(listener->getPresentityUri());
 		if (!presenceInfo) {
 			/*no information available yet, but creating entry to be able to register subscribers*/
-			presenceInfo = make_shared<PresentityPresenceInformation>(listener->getPresentityUri(), *this,
-			                                                          belle_sip_stack_get_main_loop(getStack()));
+			presenceInfo = PresentityPresenceInformation::make(listener->getPresentityUri(), *this,
+			                                                   belle_sip_stack_get_main_loop(getStack()));
 			SLOGD << "New Presentity [" << *presenceInfo << "] created from SUBSCRIBE";
 			addPresenceInfo(presenceInfo);
 		}
@@ -185,8 +185,7 @@ string MapPresentityManager::handlePublishFor(const belle_sip_uri_t* entityUri,
                                               int expires) {
 	shared_ptr<PresentityPresenceInformation> presenceInfo;
 	if (!(presenceInfo = getPresenceInfo(entityUri))) {
-		presenceInfo =
-		    make_shared<PresentityPresenceInformation>(entityUri, *this, belle_sip_stack_get_main_loop(getStack()));
+		presenceInfo = PresentityPresenceInformation::make(entityUri, *this, belle_sip_stack_get_main_loop(getStack()));
 		SLOGD << "New Presentity [" << *presenceInfo << "] created from PUBLISH";
 		addPresenceInfo(presenceInfo);
 	} else {
@@ -210,6 +209,21 @@ std::string MapPresentityManager::handlePublishRefreshedFor(const string& eTag, 
 		} else {
 			throw BELLESIP_SIGNALING_EXCEPTION_1(400, belle_sip_header_create("Warning", "Unknown etag"));
 		}
+	}
+}
+
+void MapPresentityManager::handleLongtermPresence(
+    const belle_sip_uri_t* entityUri, const std::shared_ptr<PresentityPresenceInformation>& originalEntity) {
+	shared_ptr<PresentityPresenceInformation> presenceInfo;
+	if (!(presenceInfo = getPresenceInfo(entityUri))) {
+		presenceInfo = PresentityPresenceInformation::make(entityUri, *this, belle_sip_stack_get_main_loop(getStack()));
+		SLOGD << "New Presentity [" << *presenceInfo << "] created from LongTerm Presence, linking with "
+		      << *originalEntity;
+		addPresenceInfo(presenceInfo);
+		presenceInfo->linkTo(originalEntity);
+	} else {
+		SLOGD << "Presentity [" << *presenceInfo << "] found, linking with " << originalEntity;
+		originalEntity->linkTo(presenceInfo);
 	}
 }
 

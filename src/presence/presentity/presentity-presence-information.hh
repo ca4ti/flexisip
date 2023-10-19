@@ -27,6 +27,7 @@
 
 #include "flexisip/flexisip-exception.hh"
 
+#include "presence-information-element-map.hh"
 #include "presence/belle-sip-using.hh"
 #include "xml/pidf+xml.hh"
 
@@ -40,12 +41,12 @@ class PresentityPresenceInformationListener;
  * Presence Information is the key class representing a presentity. This class can be either created by a Publish for a
  * presentity or by a Subscription to a presentity
  */
-class PresentityPresenceInformation : public std::enable_shared_from_this<PresentityPresenceInformation> {
+class PresentityPresenceInformation : public std::enable_shared_from_this<PresentityPresenceInformation>,
+                                      public ElementMapListener {
 
 public:
-	PresentityPresenceInformation(const belle_sip_uri_t* entity,
-	                              PresentityManager& presentityManager,
-	                              belle_sip_main_loop_t* ml);
+	static std::shared_ptr<PresentityPresenceInformation>
+	make(const belle_sip_uri_t* entity, PresentityManager& presentityManager, belle_sip_main_loop_t* ml);
 	virtual ~PresentityPresenceInformation();
 
 	/*
@@ -54,8 +55,9 @@ public:
 	 * */
 	std::string putTuples(Xsd::Pidf::Presence::TupleSequence& tuples, Xsd::DataModel::Person& person, int expires);
 
-	void setDefaultElement(const char* contact = nullptr);
+	void setDefaultElement();
 
+	void setDefaultElement(const belle_sip_uri_t* newEntity);
 	/*
 	 *
 	 * Update tuples attached to an eTag
@@ -148,7 +150,16 @@ public:
 	std::shared_ptr<PresentityPresenceInformationListener>
 	findPresenceInfoListener(std::shared_ptr<PresentityPresenceInformation>& info);
 
+	void onMapUpdate() override {
+		notifyAll();
+	}
+
+	void linkTo(std::shared_ptr<PresentityPresenceInformation> other);
+
 private:
+	PresentityPresenceInformation(const belle_sip_uri_t* entity,
+	                              PresentityManager& presentityManager,
+	                              belle_sip_main_loop_t* ml);
 	PresentityPresenceInformation(const PresentityPresenceInformation& other);
 	/*
 	 * tuples may be null
@@ -171,8 +182,9 @@ private:
 	const belle_sip_uri_t* mEntity;
 	PresentityManager& mPresentityManager;
 	belle_sip_main_loop_t* mBelleSipMainloop;
+
 	// Tuples ordered by Etag.
-	std::map<std::string /*Etag*/, PresenceInformationElement*> mInformationElements;
+	std::shared_ptr<PresenceInformationElementMap> mInformationElements;
 
 	// list of subscribers function to be called when a tuple changed
 	mutable std::list<std::weak_ptr<PresentityPresenceInformationListener>> mSubscribers;
@@ -181,9 +193,7 @@ private:
 	                                                                        // when all publish have expired.
 	std::string mName;
 	std::string mCapabilities;
-	std::map<std::string, std::string> mAddedCapabilities;
-	std::optional<std::chrono::system_clock::time_point> mLastActivity = std::nullopt;
-	BelleSipSourcePtr mLastActivityTimer = nullptr;
+	std::unordered_map<std::string, std::string> mAddedCapabilities;
 };
 
 std::ostream& operator<<(std::ostream& __os, const PresentityPresenceInformation&);

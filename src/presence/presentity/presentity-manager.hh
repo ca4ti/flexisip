@@ -41,6 +41,9 @@ public:
 
 	virtual std::string handlePublishRefreshedFor(const std::string& eTag, int expires) = 0;
 
+	virtual void handleLongtermPresence(const belle_sip_uri_t* entityUri,
+	                                    const std::shared_ptr<PresentityPresenceInformation>& originalEntity) = 0;
+
 	//////// Presentities by uris
 	virtual std::shared_ptr<PresentityPresenceInformation> getPresenceInfo(const belle_sip_uri_t* identity) const = 0;
 	/**

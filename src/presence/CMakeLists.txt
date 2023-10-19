@@ -28,6 +28,7 @@ target_sources(flexisip PRIVATE
         presence-server.cc presence-server.hh
         presentity/map-presentity-manager.cc presentity/map-presentity-manager.hh
         presentity/presence-information-element.cc presentity/presence-information-element.hh
+        presentity/presence-information-element-map.cc presentity/presence-information-element-map.hh
         presentity/presentity-manager.hh
         presentity/presentity-presence-information.cc presentity/presentity-presence-information.hh
         presentity/presentity-presence-information-listener.cc presentity/presentity-presence-information-listener.hh

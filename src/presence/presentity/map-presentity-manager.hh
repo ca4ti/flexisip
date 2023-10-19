@@ -45,6 +45,9 @@ public:
 
 	std::string handlePublishRefreshedFor(const std::string& eTag, int expires) override;
 
+	void handleLongtermPresence(const belle_sip_uri_t* entityUri,
+	                            const std::shared_ptr<PresentityPresenceInformation>& originalEntity) override;
+
 	std::shared_ptr<PresentityPresenceInformation> getPresenceInfo(const belle_sip_uri_t* identity) const override;
 	void addPresenceInfo(const std::shared_ptr<PresentityPresenceInformation>&) override;
 

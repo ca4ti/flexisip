@@ -59,21 +59,25 @@ private:
 
 		const char* cuser = belle_sip_uri_get_user(info->getEntity());
 		if (result == AuthDbResult::PASSWORD_FOUND) {
+			auto isPhone = false;
+			if (const auto userParam = belle_sip_uri_get_user_param(info->getEntity())) {
+				isPhone = strcmp(userParam, "phone") == 0;
+			}
 			// result is a phone alias if (and only if) user is not the same as the entity user
-			bool isPhone = (strcmp(user.c_str(), cuser) != 0);
-			belle_sip_uri_t* uri = BELLE_SIP_URI(belle_sip_object_clone(BELLE_SIP_OBJECT(info->getEntity())));
-			char* contact_as_string = belle_sip_uri_to_string(uri);
-			if (isPhone) {
+			auto isAlias = strcmp(user.c_str(), cuser) != 0;
+			auto* uri = BELLE_SIP_URI(belle_sip_object_clone(BELLE_SIP_OBJECT(info->getEntity())));
+			char* contactString = belle_sip_uri_to_string(uri);
+			if (isAlias || isPhone) {
 				// change contact accordingly
-				belle_sip_free(contact_as_string);
-				belle_sip_parameters_t* params = BELLE_SIP_PARAMETERS(uri);
+				belle_sip_free(contactString);
+				auto* params = BELLE_SIP_PARAMETERS(uri);
 				belle_sip_parameters_remove_parameter(params, "user");
 				belle_sip_uri_set_user(uri, user.c_str());
-				contact_as_string = belle_sip_uri_to_string(uri);
+				contactString = belle_sip_uri_to_string(uri);
 				SLOGD << __FILE__ << ": "
 				      << "Found user " << user << " for phone " << belle_sip_uri_get_user(info->getEntity())
-				      << ", adding contact " << contact_as_string << " presence information";
-				info->setDefaultElement(contact_as_string);
+				      << ", adding contact " << contactString << " presence information";
+				info->setDefaultElement(uri);
 			} else {
 				SLOGD << __FILE__ << ": "
 				      << "Found user " << user << ", adding presence information";
@@ -83,10 +87,10 @@ private:
 
 			class InternalListListener : public ContactUpdateListener {
 			public:
-				InternalListListener(shared_ptr<PresentityPresenceInformation> info) : mInfo(info) {
+				explicit InternalListListener(const shared_ptr<PresentityPresenceInformation>& info) : mInfo(info) {
 				}
 
-				void onRecordFound(const std::shared_ptr<Record>& record) {
+				void onRecordFound(const std::shared_ptr<Record>& record) override {
 					if (!record) return;
 
 					for (const auto& extendedContact : record->getExtendedContacts()) {
@@ -94,11 +98,11 @@ private:
 						if (!specs.empty()) mInfo->addCapability(specs);
 					}
 				}
-				void onError() {
+				void onError() override {
 				}
-				void onInvalid() {
+				void onInvalid() override {
 				}
-				void onContactUpdated(const std::shared_ptr<ExtendedContact>&) {
+				void onContactUpdated(const std::shared_ptr<ExtendedContact>&) override {
 				}
 
 				su_home_t* getHome() {
@@ -111,9 +115,9 @@ private:
 			};
 
 			// Fetch Redis info.
-			shared_ptr<InternalListListener> listener = make_shared<InternalListListener>(info);
-			RegistrarDb::get()->fetch(SipUri{contact_as_string}, listener);
-			belle_sip_free(contact_as_string);
+			auto listener = make_shared<InternalListListener>(info);
+			RegistrarDb::get()->fetch(SipUri{contactString}, listener);
+			belle_sip_free(contactString);
 		} else {
 			SLOGD << __FILE__ << ": "
 			      << "Could not find user " << cuser << ".";
@@ -142,12 +146,10 @@ void PresenceLongterm::onListenerEvents(list<shared_ptr<PresentityPresenceInform
 	map<string, shared_ptr<PresentityPresenceInformation>> dInfo;
 	for (const shared_ptr<PresentityPresenceInformation>& info : infos) {
 		if (!info->hasDefaultElement()) {
-			creds.push_back(make_tuple(belle_sip_uri_get_user(info->getEntity()),
-			                           belle_sip_uri_get_host(info->getEntity()),
-			                           new PresenceAuthListener(mMainLoop, info)));
+			creds.emplace_back(belle_sip_uri_get_user(info->getEntity()), belle_sip_uri_get_host(info->getEntity()),
+			                   new PresenceAuthListener(mMainLoop, info));
 		}
-		dInfo.insert(
-		    pair<string, shared_ptr<PresentityPresenceInformation>>(belle_sip_uri_get_user(info->getEntity()), info));
+		dInfo.try_emplace(belle_sip_uri_get_user(info->getEntity()), info);
 	}
 	AuthDbBackend::get().getUsersWithPhone(creds);
 }
