@@ -69,6 +69,12 @@ Session::State& Session::connect(su_root_t* sofiaRoot) {
 	}();
 	return mState;
 }
+Session::State& Session::disconnect() {
+	return mState = Match(std::move(mState))
+	                    .against([](Connected&& connected) -> State { return Disconnecting(std::move(connected)); },
+	                             [](Disconnecting&& disconnecting) -> State { return std::move(disconnecting); },
+	                             [](auto&&) -> State { return Disconnected(); });
+}
 
 void Session::onConnect(const redisAsyncContext*, int status) {
 	mState = Match(std::move(mState))

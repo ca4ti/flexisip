@@ -67,9 +67,32 @@ void test() {
 
 	auto& ready = std::get<decltype(session)::Connected>(session.getState());
 	bool returned = false;
-	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, const redisReply*) { returned = true; });
+	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, const redisReply* reply) {
+		BC_HARD_ASSERT_TRUE(reply != nullptr);
+		if (reply->type == REDIS_REPLY_ERROR) {
+			BC_HARD_FAIL(reply->str);
+		}
+		BC_HARD_ASSERT_CPP_EQUAL(reply->type, REDIS_REPLY_ARRAY);
+		BC_ASSERT_CPP_EQUAL(reply->len, 0);
+		returned = true;
+	});
 
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
+
+	returned = false;
+	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, const redisReply* reply) {
+		BC_HARD_ASSERT_TRUE(reply != nullptr);
+		if (reply->type == REDIS_REPLY_ERROR) {
+			BC_HARD_FAIL(reply->str);
+		}
+		BC_HARD_ASSERT_CPP_EQUAL(reply->type, REDIS_REPLY_ARRAY);
+		BC_ASSERT_CPP_EQUAL(reply->len, 0);
+		returned = true;
+	});
+	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnecting>(session.disconnect()));
+	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnecting>(session.getState()));
+	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
+	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(session.getState()));
 }
 
 namespace {

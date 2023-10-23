@@ -281,8 +281,10 @@ private:
 	void onTryReconnectTimer();
 
 	redisAsyncContext* mContext{nullptr};
-	// Why do we need a second context?? Why don't we issue the subscribe commands through the main context? Why
-	// initiate (and manage) 2 connections to the same server?
+	// From https://redis.io/commands/subscribe/
+	// "Once the client enters the subscribed state it is not supposed to issue any other commands, except for
+	// additional SUBSCRIBE, SSUBSCRIBE, PSUBSCRIBE, UNSUBSCRIBE, SUNSUBSCRIBE, PUNSUBSCRIBE, PING, RESET and QUIT
+	// commands"
 	redisAsyncContext* mSubscribeContext{nullptr};
 	RecordSerializer* mSerializer;
 	RedisParameters mParams{};

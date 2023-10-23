@@ -81,6 +81,7 @@ public:
 
 	class Disconnecting {
 		friend std::ostream& operator<<(std::ostream&, const Disconnecting&);
+		friend Session;
 
 	private:
 		explicit Disconnecting(Connected&&);
@@ -93,6 +94,7 @@ public:
 	State& getState();
 	const std::weak_ptr<void>& getCustomData() const;
 	State& connect(su_root_t*);
+	State& disconnect();
 
 private:
 	void onConnect(const redisAsyncContext*, int status);
@@ -262,6 +264,9 @@ public:
 	}
 	State& connect(su_root_t* sofiaRoot) {
 		return reinterpret_cast<State&>(mContext.connect(sofiaRoot));
+	}
+	State& disconnect() {
+		return reinterpret_cast<State&>(mContext.disconnect());
 	}
 
 private:
