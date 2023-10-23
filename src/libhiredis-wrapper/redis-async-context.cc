@@ -12,6 +12,7 @@
 
 #include "flexisip/logmanager.hh"
 
+#include "hiredis.h"
 #include "registrardb-redis-sofia-event.h"
 #include "registrardb-redis.hh"
 #include "utils/variant-utils.hh"
@@ -98,7 +99,7 @@ void Session::onDisconnect(const redisAsyncContext* ctx, int status) {
 	if (status != REDIS_OK) {
 		SLOGW << mLogPrefix << "Forcefully disconnecting. Reason: " << ctx->errstr;
 	}
-	SLOGD << mLogPrefix << "Disconnected (was in state: " << StreamableVariant(mState) << ")";
+	SLOGD << mLogPrefix << "Disconnected. Was in state: " << StreamableVariant(mState);
 	mState = Disconnected();
 }
 
@@ -106,8 +107,8 @@ Session::Connecting::Connecting(ContextPtr&& ctx) : mCtx(std::move(ctx)) {
 }
 Session::Connected::Connected(Connecting&& prev) : mCtx(std::move(prev.mCtx)) {
 }
-Session::Disconnecting::Disconnecting(Connected&& prev) {
-	redisAsyncDisconnect(prev.mCtx.release());
+Session::Disconnecting::Disconnecting(Connected&& prev) : mCtx(std::move(prev.mCtx)) {
+	redisAsyncDisconnect(mCtx.get());
 }
 
 int Session::Connected::command(const RedisArgsPacker& args, CommandCallback&& callback) {
@@ -139,13 +140,13 @@ std::ostream& operator<<(std::ostream& stream, const Session::Connecting& connec
 std::ostream& operator<<(std::ostream& stream, const Session::Connected& connected) {
 	return stream << "Connected(ctx: " << connected.mCtx.get() << ")";
 }
-std::ostream& operator<<(std::ostream& stream, const Session::Disconnecting&) {
-	return stream << "Disconnecting()";
+std::ostream& operator<<(std::ostream& stream, const Session::Disconnecting& disconnecting) {
+	return stream << "Disconnecting(ctx: " << disconnecting.mCtx.get() << ")";
 }
 
 void Session::ContextDeleter::operator()(redisAsyncContext* ctx) noexcept {
-	if (ctx->c.flags & REDIS_FREEING) {
-		// We're in a callback, the context is already being freed
+	if (ctx->c.flags & (REDIS_FREEING | REDIS_DISCONNECTING)) {
+		// The context is already halfway through freeing/disconnecting and we're probably in a disconnect callback
 		return;
 	}
 

@@ -88,6 +88,7 @@ public:
 
 	private:
 		explicit Disconnecting(Connected&&);
+		ContextPtr mCtx;
 	};
 
 	using State = std::variant<Disconnected, Connecting, Connected, Disconnecting>;
