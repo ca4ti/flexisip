@@ -2,6 +2,7 @@
  *  SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+#include "hiredis.h"
 #include "libhiredis-wrapper/redis-async-context.hh"
 
 #include <cstddef>
@@ -29,7 +30,7 @@ class TestRedisClient {
 public:
 	std::uint8_t mReplyReceived = 0;
 
-	void onHGETALLWithData(redis::async::SessionWith<TestRedisClient>& session, const redisReply* reply, int&& data) {
+	void onHGETALLWithData(redis::async::SessionWith<TestRedisClient>&, const redisReply* reply, int&& data) {
 		BC_HARD_ASSERT_TRUE(reply != nullptr);
 		if (reply->type == REDIS_REPLY_ERROR) {
 			BC_HARD_FAIL(reply->str);
@@ -65,12 +66,10 @@ void test() {
 	    1, [&session]() { return std::holds_alternative<decltype(session)::Connected>(session.getState()); }));
 
 	auto& ready = std::get<decltype(session)::Connected>(session.getState());
-	ready.command({"HGETALL", "*"}).with<int>(34).then<&TestRedisClient::onHGETALLWithData>();
+	bool returned = false;
+	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, const redisReply*) { returned = true; });
 
-	ready.command({"HGETALL", "*"}).then<&TestRedisClient::onHGETALLWithoutData>();
-
-	BC_ASSERT_TRUE(
-	    asserter.iterateUpTo(1, [&replyReceived = handler->mReplyReceived]() { return 2 <= replyReceived; }));
+	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
 }
 
 namespace {

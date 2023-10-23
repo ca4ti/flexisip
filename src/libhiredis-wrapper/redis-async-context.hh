@@ -7,8 +7,10 @@
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -161,8 +163,18 @@ public:
 
 	class Connected : Session::Connected {
 	public:
-		Command command(const RedisArgsPacker& args) {
-			return Command(*this, args);
+		using TCallback = std::function<void(SessionWith<TSessionData>&, const redisReply*)>;
+
+		void command(const RedisArgsPacker& args, TCallback&& callback) {
+			sendCommand(
+			    [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
+				    std::unique_ptr<TCallback> commandContext{static_cast<TCallback*>(rawCommandData)};
+				    if (reply == nullptr) return; // Session is being freed
+
+				    auto& typedSession = *static_cast<SessionWith<TSessionData>*>(asyncCtx->data);
+				    (*commandContext)(typedSession, static_cast<const redisReply*>(reply));
+			    },
+			    args, std::make_unique<TCallback>(std::move(callback)).release());
 		}
 	};
 	static_assert(sizeof(Connected) == sizeof(Session::Connected), "Must be reinterpret_cast-able");
