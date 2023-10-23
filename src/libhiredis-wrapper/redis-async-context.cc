@@ -18,8 +18,7 @@
 
 namespace flexisip::redis::async {
 
-Session::Session(RedisParameters&& params, std::weak_ptr<void>&& customData)
-    : mParams(std::move(params)), mCustomData(std::move(customData)) {
+Session::Session(RedisParameters&& params) : mParams(std::move(params)) {
 	std::stringstream prefix{};
 	prefix << "redis::async::Context[" << this << "] - ";
 	mLogPrefix = prefix.str();
@@ -111,9 +110,17 @@ Session::Disconnecting::Disconnecting(Connected&& prev) {
 	redisAsyncDisconnect(prev.mCtx.release());
 }
 
-int Session::Connected::sendCommand(redisCallbackFn* fn, const RedisArgsPacker& args, void* privdata) {
+int Session::Connected::command(const RedisArgsPacker& args, CommandCallback&& callback) {
 	return redisAsyncCommandArgv(
-	    mCtx.get(), fn, privdata, args.getArgCount(),
+	    mCtx.get(),
+	    [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
+		    std::unique_ptr<CommandCallback> commandContext{static_cast<CommandCallback*>(rawCommandData)};
+		    if (reply == nullptr) return; // Session is being freed
+
+		    auto& typedSession = *static_cast<Session*>(asyncCtx->data);
+		    (*commandContext)(typedSession, static_cast<const redisReply*>(reply));
+	    },
+	    std::make_unique<CommandCallback>(std::move(callback)).release(), args.getArgCount(),
 	    // This const char** signature supposedly suggests that while the array itself is const, its elements are not.
 	    // But I don't see a reason the args would be modified by this function, so I assume this is just a mistake.
 	    const_cast<const char**>(args.getCArgs()), args.getArgSizes());
@@ -121,9 +128,6 @@ int Session::Connected::sendCommand(redisCallbackFn* fn, const RedisArgsPacker& 
 
 Session::State& Session::getState() {
 	return mState;
-}
-const std::weak_ptr<void>& Session::getCustomData() const {
-	return mCustomData;
 }
 
 std::ostream& operator<<(std::ostream& stream, const Session::Disconnected&) {

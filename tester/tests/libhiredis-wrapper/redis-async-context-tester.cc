@@ -26,38 +26,11 @@
 
 namespace flexisip::tester {
 
-class TestRedisClient {
-public:
-	std::uint8_t mReplyReceived = 0;
-
-	void onHGETALLWithData(redis::async::SessionWith<TestRedisClient>&, const redisReply* reply, int&& data) {
-		BC_HARD_ASSERT_TRUE(reply != nullptr);
-		if (reply->type == REDIS_REPLY_ERROR) {
-			BC_HARD_FAIL(reply->str);
-		}
-		BC_HARD_ASSERT_CPP_EQUAL(reply->type, REDIS_REPLY_ARRAY);
-		BC_ASSERT_CPP_EQUAL(reply->len, 0);
-		BC_ASSERT_CPP_EQUAL(data, 34);
-		mReplyReceived++;
-	}
-
-	void onHGETALLWithoutData(redis::async::SessionWith<TestRedisClient>&, const redisReply* reply) {
-		BC_HARD_ASSERT_TRUE(reply != nullptr);
-		if (reply->type == REDIS_REPLY_ERROR) {
-			BC_HARD_FAIL(reply->str);
-		}
-		BC_HARD_ASSERT_CPP_EQUAL(reply->type, REDIS_REPLY_ARRAY);
-		BC_ASSERT_CPP_EQUAL(reply->len, 0);
-		mReplyReceived++;
-	}
-};
-
 void test() {
 	RedisServer redis{};
 	sofiasip::SuRoot root{};
 	CoreAssert asserter{root};
-	const auto handler = std::make_shared<TestRedisClient>();
-	redis::async::SessionWith<TestRedisClient> session({.domain = "localhost", .port = redis.port()}, handler);
+	redis::async::Session session{{.domain = "localhost", .port = redis.port()}};
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(session.getState()));
 
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connecting>(session.connect(root.getCPtr())));
