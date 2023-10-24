@@ -17,6 +17,8 @@
 #include "registrardb-redis.hh"
 #include "utils/variant-utils.hh"
 
+using namespace std::string_view_literals;
+
 namespace flexisip::redis::async {
 
 Session::Session(RedisParameters&& params) : mParams(std::move(params)) {
@@ -112,16 +114,38 @@ Session::Disconnecting::Disconnecting(Connected&& prev) : mCtx(std::move(prev.mC
 }
 
 int Session::Connected::command(const RedisArgsPacker& args, CommandCallback&& callback) {
-	return redisAsyncCommandArgv(
-	    mCtx.get(),
-	    [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
-		    std::unique_ptr<CommandCallback> commandContext{static_cast<CommandCallback*>(rawCommandData)};
-		    if (reply == nullptr) return; // Session is being freed
+	return command(args, std::move(callback),
+	               [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
+		               std::unique_ptr<CommandCallback> commandContext{static_cast<CommandCallback*>(rawCommandData)};
+		               if (reply == nullptr) return; // Session is being freed
 
-		    auto& typedSession = *static_cast<Session*>(asyncCtx->data);
-		    (*commandContext)(typedSession, static_cast<const redisReply*>(reply));
-	    },
-	    std::make_unique<CommandCallback>(std::move(callback)).release(), args.getArgCount(),
+		               auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
+		               (*commandContext)(sessionContext, static_cast<const redisReply*>(reply));
+	               });
+}
+
+int SubscriptionSession::Connected::subscribe(const RedisArgsPacker& args, CommandCallback&& callback) {
+	return mWrapped.command(args, std::move(callback),
+	                        [](redisAsyncContext* asyncCtx, void* rawReply, void* rawCommandData) noexcept {
+		                        auto* commandContext{static_cast<CommandCallback*>(rawCommandData)};
+		                        if (rawReply == nullptr) { // Session is being freed
+			                        delete commandContext;
+			                        return;
+		                        }
+		                        auto* reply = static_cast<const redisReply*>(rawReply);
+		                        if (reply->element[0]->str == "unsubscribe"sv) {
+			                        delete commandContext;
+			                        return;
+		                        }
+
+		                        auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
+		                        (*commandContext)(sessionContext, static_cast<const redisReply*>(reply));
+	                        });
+}
+
+int Session::Connected::command(const RedisArgsPacker& args, CommandCallback&& callback, redisCallbackFn* fn) {
+	return redisAsyncCommandArgv(
+	    mCtx.get(), fn, std::make_unique<CommandCallback>(std::move(callback)).release(), args.getArgCount(),
 	    // This const char** signature supposedly suggests that while the array itself is const, its elements are not.
 	    // But I don't see a reason the args would be modified by this function, so I assume this is just a mistake.
 	    const_cast<const char**>(args.getCArgs()), args.getArgSizes());

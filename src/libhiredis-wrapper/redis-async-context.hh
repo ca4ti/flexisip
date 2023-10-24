@@ -44,6 +44,8 @@ private:
 	sofiasip::Waker mWaker;
 };
 
+class SubscriptionSession;
+
 class Session {
 public:
 	template <typename TContextData>
@@ -73,11 +75,13 @@ public:
 	public:
 		friend class Session;
 		friend std::ostream& operator<<(std::ostream&, const Connected&);
+		friend class SubscriptionSession;
 
 		// SAFETY: Do not use with subscribe
 		int command(const RedisArgsPacker& args, CommandCallback&& callback);
 
 	private:
+		int command(const RedisArgsPacker&, CommandCallback&&, redisCallbackFn*);
 		explicit Connected(Connecting&&);
 		ContextPtr mCtx;
 	};
@@ -108,6 +112,35 @@ private:
 	// Must be the last member of self, to be destructed first. Destructing the ContextPtr calls onDisconnect
 	// synchronously, which still needs access to the rest of self.
 	State mState{Disconnected()};
+};
+
+class SubscriptionSession : Session {
+public:
+	using CommandCallback = Session::CommandCallback;
+
+	class Connected {
+	public:
+		int subscribe(const RedisArgsPacker& args, CommandCallback&& callback);
+
+	private:
+		Session::Connected mWrapped;
+	};
+	static_assert(sizeof(Connected) == sizeof(Session::Connected), "Must be reinterpret_cast-able");
+
+	using State = std::variant<Disconnected, Connecting, Connected, Disconnecting>;
+
+	SubscriptionSession(RedisParameters&& redisParams) : Session(std::move(redisParams)) {
+	}
+
+	State& getState() {
+		return reinterpret_cast<State&>(Session::getState());
+	}
+	State& connect(su_root_t* sofiaRoot) {
+		return reinterpret_cast<State&>(Session::connect(sofiaRoot));
+	}
+	State& disconnect() {
+		return reinterpret_cast<State&>(Session::disconnect());
+	}
 };
 
 } // namespace flexisip::redis::async
