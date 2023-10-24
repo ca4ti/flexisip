@@ -23,7 +23,6 @@
 #include "utils/redis-server.hh"
 #include "utils/test-patterns/test.hh"
 #include "utils/test-suite.hh"
-#include "utils/variant-utils.hh"
 
 namespace flexisip::tester {
 
@@ -54,11 +53,8 @@ void test() {
 	ready.command({"HELLO"}, [&returned](decltype(session)&, redis::async::Reply reply) {
 		const auto* array = std::get_if<redis::reply::Array>(&reply);
 		BC_HARD_ASSERT_TRUE(array != nullptr);
-		for (auto elem : *array) {
-			Match(elem).against([](const redis::reply::String& str) { SLOGD << "BEDUG STRING " << str; },
-			                    [](const redis::reply::Integer& integer) { SLOGD << "BEDUG INTEGER " << integer; },
-			                    [](const auto&) { SLOGD << "BEDUG OTHER "; });
-		}
+		SLOGD << "Server information: " << *array;
+		BC_ASSERT(std::get<redis::reply::String>((*array)[1]) == "redis");
 		returned = true;
 	});
 

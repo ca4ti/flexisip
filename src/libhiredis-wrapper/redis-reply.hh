@@ -12,8 +12,13 @@
 
 namespace flexisip::redis::reply {
 
-class String : public std::string_view {};
-class Error : public std::string_view {};
+class String : public std::string_view {
+	friend std::ostream& operator<<(std::ostream&, const String&);
+};
+class Error : public std::string_view {
+public:
+	friend std::ostream& operator<<(std::ostream&, const Error&);
+};
 using Integer = decltype(redisReply::integer);
 class Array;
 
@@ -57,6 +62,8 @@ public:
 	}
 
 	Reply operator[](std::size_t) const;
+
+	friend std::ostream& operator<<(std::ostream&, const Array&);
 
 private:
 	const redisReply* const* mElements;

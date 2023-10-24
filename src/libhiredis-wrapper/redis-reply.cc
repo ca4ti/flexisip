@@ -5,10 +5,13 @@
 #include "redis-reply.hh"
 
 #include <cstddef>
+#include <ostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 #include "compat/hiredis/async.h"
+#include "utils/variant-utils.hh"
 
 namespace flexisip::redis::reply {
 
@@ -38,6 +41,23 @@ Reply Array::operator[](std::size_t index) const {
 		throw std::out_of_range{"Index out of range on Redis array reply"};
 	}
 	return tryFrom(mElements[index]);
+}
+
+std::ostream& operator<<(std::ostream& stream, const Error& error) {
+	return stream << "redis::Error('" << static_cast<const std::string_view&>(error) << "')";
+}
+std::ostream& operator<<(std::ostream& stream, const String& str) {
+	return stream << '"' << static_cast<const std::string_view&>(str) << '"';
+}
+std::ostream& operator<<(std::ostream& stream, const Array& array) {
+	stream << "redis::Array{";
+	if (0 < array.size()) {
+		stream << "\n";
+		for (auto elem : array) {
+			stream << "\t" << StreamableVariant(elem) << ",\n";
+		}
+	}
+	return stream << "}";
 }
 
 } // namespace flexisip::redis::reply
