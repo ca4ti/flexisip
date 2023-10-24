@@ -135,7 +135,6 @@ struct RedisRegisterContext {
 	}
 };
 
-
 class RegistrarDbRedisAsync : public RegistrarDb {
 public:
 	friend class redis::RedisCommandTimer;
@@ -235,12 +234,12 @@ private:
 	 */
 	void onTryReconnectTimer();
 
-	redisAsyncContext* mContext{nullptr};
+	redisAsyncContext* mCommandSession{nullptr};
 	// From https://redis.io/commands/subscribe/
 	// "Once the client enters the subscribed state it is not supposed to issue any other commands, except for
 	// additional SUBSCRIBE, SSUBSCRIBE, PSUBSCRIBE, UNSUBSCRIBE, SUNSUBSCRIBE, PUNSUBSCRIBE, PING, RESET and QUIT
 	// commands"
-	redisAsyncContext* mSubscribeContext{nullptr};
+	redisAsyncContext* mSubscriptionSession{nullptr};
 	RecordSerializer* mSerializer;
 	RedisParameters mParams{};
 	RedisParameters mLastActiveParams{};
