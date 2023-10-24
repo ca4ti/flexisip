@@ -92,9 +92,7 @@ size_t PresentityPresenceInformation::getNumberOfInformationElements() const {
 }
 shared_ptr<PresentityPresenceInformationListener>
 PresentityPresenceInformation::findPresenceInfoListener(shared_ptr<PresentityPresenceInformation>& info) {
-	return findSubscriber([&info](const shared_ptr<PresentityPresenceInformationListener>& l) {
-		return belle_sip_uri_equals(l->getTo(), info->getEntity());
-	});
+	return mInformationElements->findPresenceInfoListener(info);
 }
 string PresentityPresenceInformation::putTuples(Xsd::Pidf::Presence::TupleSequence& tuples,
                                                 Xsd::DataModel::Person& person,
@@ -238,6 +236,7 @@ void PresentityPresenceInformation::addListenerIfNecessary(
 	} else {
 		// not found, adding
 		mSubscribers.emplace_back(listener);
+		mInformationElements->addParentListener(listener);
 		op = "Adding";
 	}
 	SLOGD << op << " listener [" << listener.get() << "] on [" << *this << "]";

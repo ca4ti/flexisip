@@ -68,6 +68,8 @@ private:
 	std::map<std::string, std::shared_ptr<PresentityPresenceInformation>> mPresenceInformationsByEtag;
 	std::unordered_map<const belle_sip_uri_t*, std::shared_ptr<PresentityPresenceInformation>> mPresenceInformations;
 	std::vector<std::shared_ptr<PresenceInfoObserver>> mPresenceInfoObservers;
+	void enableExtendedNotifyIfPossible(std::shared_ptr<PresentityPresenceInformationListener>& listener,
+	                                    std::shared_ptr<PresentityPresenceInformation>& presenceInfo) const;
 };
 
 } // namespace flexisip

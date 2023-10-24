@@ -130,7 +130,7 @@ private:
 	map<string, shared_ptr<PresentityPresenceInformation>> mDInfo;
 };
 
-void PresenceLongterm::onListenerEvent(const shared_ptr<PresentityPresenceInformation>& info) const {
+void PresenceLongterm::onListenerEvent(const std::shared_ptr<PresentityPresenceInformation>& info) const {
 	if (!info->hasDefaultElement()) {
 		// no presence information know yet, so ask again to the db.
 		const belle_sip_uri_t* uri = info->getEntity();

@@ -91,9 +91,18 @@ void MapPresentityManager::addOrUpdateListener(shared_ptr<PresentityPresenceInfo
 
 	// notify observers that a listener is added or updated
 	for (auto& observer : mPresenceInfoObservers) {
-		observer->onListenerEvent(presenceInfo);
+		observer->onListenerEvent(presenceInfo, listener);
 	}
 
+	enableExtendedNotifyIfPossible(listener, presenceInfo);
+
+	if (expires > 0) presenceInfo->addOrUpdateListener(listener, expires);
+	else presenceInfo->addOrUpdateListener(listener);
+}
+
+void MapPresentityManager::enableExtendedNotifyIfPossible(
+    shared_ptr<PresentityPresenceInformationListener>& listener,
+    shared_ptr<PresentityPresenceInformation>& presenceInfo) const {
 	presenceInfo->addListenerIfNecessary(listener);
 	if (!listener->extendedNotifyEnabled()) {
 		auto toPresenceInfo = getPresenceInfo(listener->getTo());
@@ -109,9 +118,6 @@ void MapPresentityManager::addOrUpdateListener(shared_ptr<PresentityPresenceInfo
 			}
 		}
 	} else SLOGD << "Extended presence information forbidden or not available for listener [" << listener << "]";
-
-	if (expires > 0) presenceInfo->addOrUpdateListener(listener, expires);
-	else presenceInfo->addOrUpdateListener(listener);
 }
 
 void MapPresentityManager::addOrUpdateListeners(list<shared_ptr<PresentityPresenceInformationListener>>& listeners,

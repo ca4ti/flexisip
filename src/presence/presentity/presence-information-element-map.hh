@@ -23,6 +23,7 @@
 #include <unordered_map>
 
 #include "presence-information-element.hh"
+#include "presentity-presence-information-listener.hh"
 
 namespace flexisip {
 class ElementMapListener {
@@ -44,6 +45,10 @@ public:
 	void emplace(const std::string& eTag, PresenceInformationElement* element);
 	std::optional<PresenceInformationElement*> getByEtag(const std::string& eTag);
 	void removeByEtag(const std::string& eTag, bool notifyOther = true);
+
+	void addParentListener(const std::shared_ptr<PresentityPresenceInformationListener>& listener);
+	std::shared_ptr<PresentityPresenceInformationListener>
+	findPresenceInfoListener(std::shared_ptr<PresentityPresenceInformation>& info);
 
 	/**
 	 * WARNING : modify and emptied calling map
@@ -76,11 +81,17 @@ private:
 
 	void notifyListeners();
 
+	std::shared_ptr<PresentityPresenceInformationListener> findParentListener(
+	    std::function<bool(const std::shared_ptr<PresentityPresenceInformationListener>&)> predicate) const;
+
 	belle_sip_main_loop_t* mBelleSipMainloop;
 	ElementMapType mInformationElements;
 	std::vector<std::weak_ptr<ElementMapListener>> mListeners;
 	std::optional<std::chrono::system_clock::time_point> mLastActivity = std::nullopt;
 	BelleSipSourcePtr mLastActivityTimer = nullptr;
+
+	// Used to find cross-subscribe between two users
+	mutable std::list<std::weak_ptr<PresentityPresenceInformationListener>> mParentsListeners;
 };
 
 } /* namespace flexisip */

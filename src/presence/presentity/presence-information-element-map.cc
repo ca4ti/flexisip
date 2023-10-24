@@ -19,6 +19,7 @@
 #include "presence-information-element-map.hh"
 
 #include "presence/presence-server.hh"
+#include "presentity-presence-information.hh"
 
 using namespace std;
 namespace flexisip {
@@ -80,6 +81,32 @@ void PresenceInformationElementMap::notifyListeners() {
 			it = mListeners.erase(it);
 		}
 	}
+}
+
+void PresenceInformationElementMap::addParentListener(
+    const shared_ptr<PresentityPresenceInformationListener>& listener) {
+	mParentsListeners.emplace_back(listener);
+}
+
+std::shared_ptr<PresentityPresenceInformationListener> PresenceInformationElementMap::findParentListener(
+    std::function<bool(const std::shared_ptr<PresentityPresenceInformationListener>&)> predicate) const {
+	for (auto it = mParentsListeners.begin(); it != mParentsListeners.end();) {
+		auto subscriber = it->lock();
+		if (subscriber == nullptr) {
+			it = mParentsListeners.erase(it);
+			continue;
+		}
+		if (predicate(subscriber)) return subscriber;
+		it++;
+	}
+	return nullptr;
+}
+
+shared_ptr<PresentityPresenceInformationListener>
+PresenceInformationElementMap::findPresenceInfoListener(shared_ptr<PresentityPresenceInformation>& info) {
+	return findParentListener([&info](const shared_ptr<PresentityPresenceInformationListener>& l) {
+		return belle_sip_uri_equals(l->getTo(), info->getEntity());
+	});
 }
 
 } /* namespace flexisip */
