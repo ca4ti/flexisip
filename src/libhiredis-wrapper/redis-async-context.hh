@@ -15,14 +15,16 @@
 #include <variant>
 
 #include "compat/hiredis/async.h"
-#include "hiredis.h"
 #include "sofia-sip/su_wait.h"
 
 #include "flexisip/sofia-wrapper/waker.hh"
 
+#include "redis-reply.hh"
 #include "registrardb-redis.hh"
 
 namespace flexisip::redis::async {
+
+using Reply = reply::Reply;
 
 class Reactor {
 public:
@@ -56,7 +58,7 @@ public:
 	};
 	using ContextPtr = std::unique_ptr<redisAsyncContext, ContextDeleter>;
 
-	using CommandCallback = std::function<void(Session&, const redisReply*)>;
+	using CommandCallback = std::function<void(Session&, Reply)>;
 
 	class Disconnected {
 		friend std::ostream& operator<<(std::ostream&, const Disconnected&);

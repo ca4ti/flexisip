@@ -13,6 +13,7 @@
 #include "flexisip/logmanager.hh"
 
 #include "hiredis.h"
+#include "libhiredis-wrapper/redis-reply.hh"
 #include "registrardb-redis-sofia-event.h"
 #include "registrardb-redis.hh"
 #include "utils/variant-utils.hh"
@@ -120,7 +121,7 @@ int Session::Connected::command(const RedisArgsPacker& args, CommandCallback&& c
 		               if (reply == nullptr) return; // Session is being freed
 
 		               auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
-		               (*commandContext)(sessionContext, static_cast<const redisReply*>(reply));
+		               (*commandContext)(sessionContext, reply::tryFrom(static_cast<const redisReply*>(reply)));
 	               });
 }
 
@@ -139,7 +140,7 @@ int SubscriptionSession::Connected::subscribe(const RedisArgsPacker& args, Comma
 		                        }
 
 		                        auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
-		                        (*commandContext)(sessionContext, static_cast<const redisReply*>(reply));
+		                        (*commandContext)(sessionContext, reply::tryFrom(reply));
 	                        });
 }
 

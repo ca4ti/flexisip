@@ -2,7 +2,6 @@
  *  SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-#include "hiredis.h"
 #include "libhiredis-wrapper/redis-async-context.hh"
 
 #include <cstddef>
@@ -10,6 +9,7 @@
 #include <exception>
 #include <memory>
 #include <variant>
+#include <vector>
 
 #include "bctoolbox/tester.h"
 
@@ -17,12 +17,13 @@
 
 #include "compat/hiredis/hiredis.h"
 
-#include "read.h"
+#include "libhiredis-wrapper/redis-reply.hh"
 #include "registrardb-redis.hh"
 #include "utils/core-assert.hh"
 #include "utils/redis-server.hh"
 #include "utils/test-patterns/test.hh"
 #include "utils/test-suite.hh"
+#include "utils/variant-utils.hh"
 
 namespace flexisip::tester {
 
@@ -40,26 +41,34 @@ void test() {
 
 	auto& ready = std::get<decltype(session)::Connected>(session.getState());
 	bool returned = false;
-	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, const redisReply* reply) {
-		BC_HARD_ASSERT_TRUE(reply != nullptr);
-		if (reply->type == REDIS_REPLY_ERROR) {
-			BC_HARD_FAIL(reply->str);
+	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, redis::async::Reply reply) {
+		const auto* array = std::get_if<redis::reply::Array>(&reply);
+		BC_HARD_ASSERT_TRUE(array != nullptr);
+		BC_ASSERT_CPP_EQUAL(array->size(), 0);
+		returned = true;
+	});
+
+	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
+	returned = false;
+
+	ready.command({"HELLO"}, [&returned](decltype(session)&, redis::async::Reply reply) {
+		const auto* array = std::get_if<redis::reply::Array>(&reply);
+		BC_HARD_ASSERT_TRUE(array != nullptr);
+		for (auto elem : *array) {
+			Match(elem).against([](const redis::reply::String& str) { SLOGD << "BEDUG STRING " << str; },
+			                    [](const redis::reply::Integer& integer) { SLOGD << "BEDUG INTEGER " << integer; },
+			                    [](const auto&) { SLOGD << "BEDUG OTHER "; });
 		}
-		BC_HARD_ASSERT_CPP_EQUAL(reply->type, REDIS_REPLY_ARRAY);
-		BC_ASSERT_CPP_EQUAL(reply->len, 0);
 		returned = true;
 	});
 
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
 
 	returned = false;
-	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, const redisReply* reply) {
-		BC_HARD_ASSERT_TRUE(reply != nullptr);
-		if (reply->type == REDIS_REPLY_ERROR) {
-			BC_HARD_FAIL(reply->str);
-		}
-		BC_HARD_ASSERT_CPP_EQUAL(reply->type, REDIS_REPLY_ARRAY);
-		BC_ASSERT_CPP_EQUAL(reply->len, 0);
+	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, redis::async::Reply reply) {
+		const auto* array = std::get_if<redis::reply::Array>(&reply);
+		BC_HARD_ASSERT_TRUE(array != nullptr);
+		BC_ASSERT_CPP_EQUAL(array->size(), 0);
 		returned = true;
 	});
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnecting>(session.disconnect()));
