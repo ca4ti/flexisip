@@ -99,10 +99,10 @@ public:
 
 	using State = std::variant<Disconnected, Connecting, Connected, Disconnecting>;
 
-	Session(RedisParameters&&);
+	Session();
 
 	State& getState();
-	State& connect(su_root_t*);
+	State& connect(su_root_t*, const std::string_view& address, int port);
 	State& disconnect();
 
 private:
@@ -110,7 +110,6 @@ private:
 	void onDisconnect(const redisAsyncContext*, int status);
 
 	std::string mLogPrefix{};
-	RedisParameters mParams{};
 	// Must be the last member of self, to be destructed first. Destructing the ContextPtr calls onDisconnect
 	// synchronously, which still needs access to the rest of self.
 	State mState{Disconnected()};
@@ -131,14 +130,11 @@ public:
 
 	using State = std::variant<Disconnected, Connecting, Connected, Disconnecting>;
 
-	SubscriptionSession(RedisParameters&& redisParams) : Session(std::move(redisParams)) {
-	}
-
 	State& getState() {
 		return reinterpret_cast<State&>(Session::getState());
 	}
-	State& connect(su_root_t* sofiaRoot) {
-		return reinterpret_cast<State&>(Session::connect(sofiaRoot));
+	State& connect(su_root_t* sofiaRoot, const std::string_view& address, int port) {
+		return reinterpret_cast<State&>(Session::connect(sofiaRoot, address, port));
 	}
 	State& disconnect() {
 		return reinterpret_cast<State&>(Session::disconnect());

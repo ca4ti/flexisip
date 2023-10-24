@@ -30,10 +30,11 @@ void test() {
 	RedisServer redis{};
 	sofiasip::SuRoot root{};
 	CoreAssert asserter{root};
-	redis::async::Session session{{.domain = "localhost", .port = redis.port()}};
+	redis::async::Session session{};
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(session.getState()));
 
-	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connecting>(session.connect(root.getCPtr())));
+	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connecting>(
+	    session.connect(root.getCPtr(), "localhost", redis.port())));
 
 	BC_HARD_ASSERT_TRUE(asserter.iterateUpTo(
 	    1, [&session]() { return std::holds_alternative<decltype(session)::Connected>(session.getState()); }));

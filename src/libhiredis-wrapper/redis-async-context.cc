@@ -15,27 +15,26 @@
 #include "hiredis.h"
 #include "libhiredis-wrapper/redis-reply.hh"
 #include "registrardb-redis-sofia-event.h"
-#include "registrardb-redis.hh"
 #include "utils/variant-utils.hh"
 
 using namespace std::string_view_literals;
 
 namespace flexisip::redis::async {
 
-Session::Session(RedisParameters&& params) : mParams(std::move(params)) {
+Session::Session() {
 	std::stringstream prefix{};
 	prefix << "redis::async::Context[" << this << "] - ";
 	mLogPrefix = prefix.str();
 }
 
-Session::State& Session::connect(su_root_t* sofiaRoot) {
-	[this, sofiaRoot]() {
+Session::State& Session::connect(su_root_t* sofiaRoot, const std::string_view& address, int port) {
+	[&]() {
 		if (std::get_if<Disconnected>(&mState) == nullptr) {
 			SLOGE << mLogPrefix << "Cannot connect when in state: " << StreamableVariant(mState);
 			return;
 		}
 
-		ContextPtr ctx{redisAsyncConnect(mParams.domain.c_str(), mParams.port)};
+		ContextPtr ctx{redisAsyncConnect(address.data(), port)};
 		if (ctx == nullptr) {
 			SLOGE << mLogPrefix << "Failed to create context";
 			return;
