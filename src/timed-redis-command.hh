@@ -13,9 +13,9 @@
 
 namespace flexisip {
 
-class RedisArgsPacker;
-
 namespace redis {
+
+class ArgsPacker;
 
 // Logs the real-world time taken by a Redis command to return.
 // Do __not__ use with callbacks that can be called more than once.
@@ -24,7 +24,7 @@ public:
 	RedisCommandTimer() = default;
 
 	int send(redisAsyncContext* asyncContext, redisCallbackFn* callback, void* data, const char* format, ...);
-	int send(redisAsyncContext* asyncContext, redisCallbackFn* callback, void* data, RedisArgsPacker& args);
+	int send(redisAsyncContext* asyncContext, redisCallbackFn* callback, void* data, ArgsPacker& args);
 
 private:
 	class TimedRedisCommand {

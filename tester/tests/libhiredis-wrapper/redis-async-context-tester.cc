@@ -18,7 +18,6 @@
 #include "compat/hiredis/hiredis.h"
 
 #include "libhiredis-wrapper/redis-reply.hh"
-#include "registrardb-redis.hh"
 #include "utils/core-assert.hh"
 #include "utils/redis-server.hh"
 #include "utils/test-patterns/test.hh"

@@ -19,8 +19,8 @@
 
 #include "flexisip/sofia-wrapper/waker.hh"
 
+#include "redis-args-packer.hh"
 #include "redis-reply.hh"
-#include "registrardb-redis.hh"
 
 namespace flexisip::redis::async {
 
@@ -80,10 +80,10 @@ public:
 		friend class SubscriptionSession;
 
 		// SAFETY: Do not use with subscribe
-		int command(const RedisArgsPacker& args, CommandCallback&& callback);
+		int command(const ArgsPacker& args, CommandCallback&& callback);
 
 	private:
-		int command(const RedisArgsPacker&, CommandCallback&&, redisCallbackFn*);
+		int command(const ArgsPacker&, CommandCallback&&, redisCallbackFn*);
 		explicit Connected(Connecting&&);
 		ContextPtr mCtx;
 	};
@@ -121,7 +121,7 @@ public:
 
 	class Connected {
 	public:
-		int subscribe(const RedisArgsPacker& args, CommandCallback&& callback);
+		int subscribe(const ArgsPacker& args, CommandCallback&& callback);
 
 	private:
 		Session::Connected mWrapped;

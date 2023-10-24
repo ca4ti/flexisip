@@ -113,7 +113,7 @@ Session::Disconnecting::Disconnecting(Connected&& prev) : mCtx(std::move(prev.mC
 	redisAsyncDisconnect(mCtx.get());
 }
 
-int Session::Connected::command(const RedisArgsPacker& args, CommandCallback&& callback) {
+int Session::Connected::command(const ArgsPacker& args, CommandCallback&& callback) {
 	return command(args, std::move(callback),
 	               [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
 		               std::unique_ptr<CommandCallback> commandContext{static_cast<CommandCallback*>(rawCommandData)};
@@ -124,7 +124,7 @@ int Session::Connected::command(const RedisArgsPacker& args, CommandCallback&& c
 	               });
 }
 
-int SubscriptionSession::Connected::subscribe(const RedisArgsPacker& args, CommandCallback&& callback) {
+int SubscriptionSession::Connected::subscribe(const ArgsPacker& args, CommandCallback&& callback) {
 	return mWrapped.command(args, std::move(callback),
 	                        [](redisAsyncContext* asyncCtx, void* rawReply, void* rawCommandData) noexcept {
 		                        auto* commandContext{static_cast<CommandCallback*>(rawCommandData)};
@@ -143,7 +143,7 @@ int SubscriptionSession::Connected::subscribe(const RedisArgsPacker& args, Comma
 	                        });
 }
 
-int Session::Connected::command(const RedisArgsPacker& args, CommandCallback&& callback, redisCallbackFn* fn) {
+int Session::Connected::command(const ArgsPacker& args, CommandCallback&& callback, redisCallbackFn* fn) {
 	return redisAsyncCommandArgv(
 	    mCtx.get(), fn, std::make_unique<CommandCallback>(std::move(callback)).release(), args.getArgCount(),
 	    // This const char** signature supposedly suggests that while the array itself is const, its elements are not.

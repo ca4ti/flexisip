@@ -35,6 +35,7 @@
 #include "flexisip/registrar/registar-listeners.hh"
 
 #include "compat/hiredis/hiredis.h"
+#include "libhiredis-wrapper/redis-args-packer.hh"
 #include "recordserializer.hh"
 #include "redis-async-script.hh"
 #include "registrar/exceptions.hh"
@@ -60,15 +61,6 @@ const auto FETCH_EXPIRING_CONTACTS_SCRIPT = redis::AsyncScript<uint64_t, float>(
     "8f26674ebf2a65c4eee45d2ae9b98c121cf6ff43");
 
 } // namespace
-
-ostream& operator<<(ostream& out, const RedisArgsPacker& args) {
-	out << "RedisArgsPacker(";
-	for (const auto& arg : args.mArgs) {
-		out << arg << " ";
-	}
-	out << ")";
-	return out;
-}
 
 /******
  * RegistrarDbRedisAsync class
@@ -762,7 +754,7 @@ void RegistrarDbRedisAsync::serializeAndSendToRedis(RedisRegisterContext* contex
 
 	/* First delete contacts that need to be deleted */
 	if (!context->mChangeSet.mDelete.empty()) {
-		RedisArgsPacker hDelArgs("HDEL", key);
+		redis::ArgsPacker hDelArgs("HDEL", key);
 		for (const auto& ec : context->mChangeSet.mDelete) {
 			hDelArgs.addFieldName(ec->mKey);
 			delCount++;
@@ -775,7 +767,7 @@ void RegistrarDbRedisAsync::serializeAndSendToRedis(RedisRegisterContext* contex
 
 	/* Update or set new ones */
 	if (!context->mChangeSet.mUpsert.empty()) {
-		RedisArgsPacker hSetArgs("HMSET", key);
+		redis::ArgsPacker hSetArgs("HMSET", key);
 		for (const auto& ec : context->mChangeSet.mUpsert) {
 			hSetArgs.addPair(ec->mKey, ec->serializeAsUrlEncodedParams());
 			setCount++;
@@ -789,7 +781,7 @@ void RegistrarDbRedisAsync::serializeAndSendToRedis(RedisRegisterContext* contex
 	LOGD("Binding %s [%i] contact sets, [%i] contacts removed.", key.c_str(), setCount, delCount);
 
 	/* Set global expiration for the Record */
-	RedisArgsPacker expireAtCmd{"EXPIREAT", key, to_string(context->mRecord->latestExpire())};
+	redis::ArgsPacker expireAtCmd{"EXPIREAT", key, to_string(context->mRecord->latestExpire())};
 	check_redis_command(mTimedCommand.send(context->self->mContext, (redisCallbackFn*)sHandleSubcommandReply,
 	                                       new string{expireAtCmd.toString()}, expireAtCmd),
 	                    context);

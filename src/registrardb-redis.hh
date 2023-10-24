@@ -135,51 +135,6 @@ struct RedisRegisterContext {
 	}
 };
 
-/* Utility struct to create argument vectors to pass to redis, for HSET and HDEL requests for example.*/
-class RedisArgsPacker {
-public:
-	template <typename... Args>
-	RedisArgsPacker(const std::string& command, Args&&... args) {
-		addArg(command);
-		(addArg(std::forward<Args>(args)), ...);
-	}
-	void addPair(const std::string& fieldName, const std::string& value) {
-		addArg(fieldName);
-		addArg(value);
-	}
-	void addFieldName(const std::string& fieldName) {
-		addArg(fieldName);
-	}
-	const char* const* getCArgs() const {
-		return &mCArgs[0];
-	}
-	const size_t* getArgSizes() const {
-		return &mArgsSize[0];
-	}
-	size_t getArgCount() const {
-		return mCArgs.size();
-	}
-	std::string toString() const {
-		std::ostringstream os{};
-		os << *this;
-		return os.str();
-	}
-
-	friend std::ostream& operator<<(std::ostream& out, const RedisArgsPacker& args);
-
-private:
-	void addArg(const std::string& arg) {
-		mArgs.emplace_back(arg);
-		mCArgs.emplace_back(mArgs.back().c_str()); // The C string pointer is held within mArgs
-		mArgsSize.push_back(arg.size());
-	}
-
-	std::list<std::string> mArgs;
-	std::vector<const char*> mCArgs;
-	std::vector<size_t> mArgsSize;
-};
-
-std::ostream& operator<<(std::ostream& out, const RedisArgsPacker& args);
 
 class RegistrarDbRedisAsync : public RegistrarDb {
 public:
