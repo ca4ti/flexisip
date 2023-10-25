@@ -95,6 +95,7 @@ void Session::onConnect(const redisAsyncContext*, int status) {
 		                       << unexpectedState;
 		                 return std::move(unexpectedState);
 	                 });
+	if (mOnConnect) mOnConnect(mState, status);
 }
 
 void Session::onDisconnect(const redisAsyncContext* ctx, int status) {
@@ -103,6 +104,7 @@ void Session::onDisconnect(const redisAsyncContext* ctx, int status) {
 	}
 	SLOGD << mLogPrefix << "Disconnected. Was in state: " << StreamableVariant(mState);
 	mState = Disconnected();
+	if (mOnDisconnect) mOnDisconnect(status);
 }
 
 Session::Connecting::Connecting(ContextPtr&& ctx) : mCtx(std::move(ctx)) {

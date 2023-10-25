@@ -31,13 +31,19 @@ void test() {
 	CoreAssert asserter{root};
 	redis::async::Session session{};
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(session.getState()));
+	bool connected = false;
+	session.onConnect([&connected](const auto& state, auto status) {
+		BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connected>(state));
+		BC_ASSERT_CPP_EQUAL(status, REDIS_OK);
+		connected = true;
+	});
 
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connecting>(
 	    session.connect(root.getCPtr(), "localhost", redis.port())));
 
-	BC_HARD_ASSERT_TRUE(asserter.iterateUpTo(
-	    1, [&session]() { return std::holds_alternative<decltype(session)::Connected>(session.getState()); }));
+	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&connected]() { return connected; }));
 
+	BC_HARD_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connected>(session.getState()));
 	auto& ready = std::get<decltype(session)::Connected>(session.getState());
 	bool returned = false;
 	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, redis::async::Reply reply) {
