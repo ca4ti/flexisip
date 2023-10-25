@@ -32,10 +32,7 @@ void test() {
 	redis::async::Session session{};
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(session.getState()));
 	bool connected = false;
-	session.onConnect([&connected](const auto& state, auto status) {
-		const auto* ready = std::get_if<redis::async::Session::Ready>(&state);
-		BC_ASSERT_PTR_NOT_NULL(ready);
-		BC_ASSERT(ready->connected());
+	session.onConnect([&connected](auto status) {
 		BC_ASSERT_CPP_EQUAL(status, REDIS_OK);
 		connected = true;
 	});
@@ -92,6 +89,9 @@ void test() {
 		returned = true;
 	});
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
+	const auto& connectionResult = session.connect(root.getCPtr(), "localhost", redis.port());
+	BC_HARD_ASSERT_CPP_EQUAL(std::get_if<redis::async::Session::Ready>(&connectionResult), ready);
+	BC_ASSERT(ready->connected()); // Already connected
 }
 
 namespace {

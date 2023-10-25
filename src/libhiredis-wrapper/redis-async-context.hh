@@ -101,7 +101,7 @@ public:
 	State& connect(su_root_t*, const std::string_view& address, int port);
 	State& disconnect();
 
-	void onConnect(std::function<void(State&, int status)>&& handler) {
+	void onConnect(std::function<void(int status)>&& handler) {
 		mOnConnect = std::move(handler);
 	}
 	void onDisconnect(std::function<void(int status)>&& handler) {
@@ -113,7 +113,7 @@ private:
 	void onDisconnect(const redisAsyncContext*, int status);
 
 	std::string mLogPrefix{};
-	std::function<void(State&, int status)> mOnConnect{};
+	std::function<void(int status)> mOnConnect{};
 	std::function<void(int status)> mOnDisconnect{};
 	// Must be the last member of self, to be destructed first. Destructing the ContextPtr calls onDisconnect
 	// synchronously, which still needs access to the rest of self.

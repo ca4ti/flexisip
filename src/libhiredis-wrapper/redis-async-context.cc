@@ -30,8 +30,8 @@ Session::Session() {
 
 Session::State& Session::connect(su_root_t* sofiaRoot, const std::string_view& address, int port) {
 	[&]() {
-		if (std::get_if<Disconnected>(&mState) == nullptr) {
-			SLOGE << mLogPrefix << "Cannot connect when in state: " << StreamableVariant(mState);
+		if (auto* ready = std::get_if<Ready>(&mState)) {
+			SLOGD << mLogPrefix << ".connect() called on " << *ready << ". noop.";
 			return;
 		}
 
@@ -97,7 +97,7 @@ void Session::onConnect(const redisAsyncContext*, int status) {
 		                       << unexpectedState;
 		                 return std::move(unexpectedState);
 	                 });
-	if (mOnConnect) mOnConnect(mState, status);
+	if (mOnConnect) mOnConnect(status);
 }
 
 void Session::onDisconnect(const redisAsyncContext* ctx, int status) {
