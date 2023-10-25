@@ -64,28 +64,24 @@ public:
 		friend std::ostream& operator<<(std::ostream&, const Disconnected&);
 	};
 
-	class Connecting {
-		friend class Session;
-		friend std::ostream& operator<<(std::ostream&, const Connecting&);
-
-	private:
-		explicit Connecting(ContextPtr&&);
-		ContextPtr mCtx;
-	};
-
-	class Connected {
+	class Ready {
 	public:
 		friend class Session;
-		friend std::ostream& operator<<(std::ostream&, const Connected&);
+		friend std::ostream& operator<<(std::ostream&, const Ready&);
 		friend class SubscriptionSession;
 
 		// SAFETY: Do not use with subscribe
 		int command(const ArgsPacker& args, CommandCallback&& callback);
 
+		bool connected() const {
+			return mConnected;
+		}
+
 	private:
 		int command(const ArgsPacker&, CommandCallback&&, redisCallbackFn*);
-		explicit Connected(Connecting&&);
+		explicit Ready(ContextPtr&&);
 		ContextPtr mCtx;
+		bool mConnected{false};
 	};
 
 	class Disconnecting {
@@ -93,11 +89,11 @@ public:
 		friend Session;
 
 	private:
-		explicit Disconnecting(Connected&&);
+		explicit Disconnecting(Ready&&);
 		ContextPtr mCtx;
 	};
 
-	using State = std::variant<Disconnected, Connecting, Connected, Disconnecting>;
+	using State = std::variant<Disconnected, Ready, Disconnecting>;
 
 	Session();
 
@@ -128,16 +124,16 @@ class SubscriptionSession : Session {
 public:
 	using CommandCallback = Session::CommandCallback;
 
-	class Connected {
+	class Ready {
 	public:
 		int subscribe(const ArgsPacker& args, CommandCallback&& callback);
 
 	private:
-		Session::Connected mWrapped;
+		Session::Ready mWrapped;
 	};
-	static_assert(sizeof(Connected) == sizeof(Session::Connected), "Must be reinterpret_cast-able");
+	static_assert(sizeof(Ready) == sizeof(Session::Ready), "Must be reinterpret_cast-able");
 
-	using State = std::variant<Disconnected, Connecting, Connected, Disconnecting>;
+	using State = std::variant<Disconnected, Ready, Disconnecting>;
 
 	State& getState() {
 		return reinterpret_cast<State&>(Session::getState());

@@ -4,6 +4,7 @@
 
 #include "redis-async-context.hh"
 
+#include <ios>
 #include <ostream>
 #include <sstream>
 #include <string_view>
@@ -67,13 +68,13 @@ Session::State& Session::connect(su_root_t* sofiaRoot, const std::string_view& a
 			return;
 		}
 
-		mState = Connecting(std::move(ctx));
+		mState = Ready(std::move(ctx));
 	}();
 	return mState;
 }
 Session::State& Session::disconnect() {
 	return mState = Match(std::move(mState))
-	                    .against([](Connected&& connected) -> State { return Disconnecting(std::move(connected)); },
+	                    .against([](Ready&& connected) -> State { return Disconnecting(std::move(connected)); },
 	                             [](Disconnecting&& disconnecting) -> State { return std::move(disconnecting); },
 	                             [](auto&&) -> State { return Disconnected(); });
 }
@@ -81,13 +82,14 @@ Session::State& Session::disconnect() {
 void Session::onConnect(const redisAsyncContext*, int status) {
 	mState = Match(std::move(mState))
 	             .against(
-	                 [&prefix = this->mLogPrefix, status](Connecting&& connecting) -> State {
+	                 [&prefix = this->mLogPrefix, status](Ready&& ready) -> State {
 		                 if (status == REDIS_OK) {
+			                 ready.mConnected = true;
 			                 SLOGD << prefix << "Connected";
-			                 return Connected(std::move(connecting));
+			                 return std::move(ready);
 		                 }
 
-		                 SLOGE << prefix << "Couldn't connect to redis: " << connecting.mCtx->errstr;
+		                 SLOGE << prefix << "Couldn't connect to redis: " << ready.mCtx->errstr;
 		                 return Disconnected();
 	                 },
 	                 [&prefix = this->mLogPrefix, status](auto&& unexpectedState) -> State {
@@ -107,15 +109,13 @@ void Session::onDisconnect(const redisAsyncContext* ctx, int status) {
 	if (mOnDisconnect) mOnDisconnect(status);
 }
 
-Session::Connecting::Connecting(ContextPtr&& ctx) : mCtx(std::move(ctx)) {
+Session::Ready::Ready(ContextPtr&& ctx) : mCtx(std::move(ctx)) {
 }
-Session::Connected::Connected(Connecting&& prev) : mCtx(std::move(prev.mCtx)) {
-}
-Session::Disconnecting::Disconnecting(Connected&& prev) : mCtx(std::move(prev.mCtx)) {
+Session::Disconnecting::Disconnecting(Ready&& prev) : mCtx(std::move(prev.mCtx)) {
 	redisAsyncDisconnect(mCtx.get());
 }
 
-int Session::Connected::command(const ArgsPacker& args, CommandCallback&& callback) {
+int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback) {
 	return command(args, std::move(callback),
 	               [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
 		               std::unique_ptr<CommandCallback> commandContext{static_cast<CommandCallback*>(rawCommandData)};
@@ -126,7 +126,7 @@ int Session::Connected::command(const ArgsPacker& args, CommandCallback&& callba
 	               });
 }
 
-int SubscriptionSession::Connected::subscribe(const ArgsPacker& args, CommandCallback&& callback) {
+int SubscriptionSession::Ready::subscribe(const ArgsPacker& args, CommandCallback&& callback) {
 	return mWrapped.command(args, std::move(callback),
 	                        [](redisAsyncContext* asyncCtx, void* rawReply, void* rawCommandData) noexcept {
 		                        auto* commandContext{static_cast<CommandCallback*>(rawCommandData)};
@@ -145,7 +145,7 @@ int SubscriptionSession::Connected::subscribe(const ArgsPacker& args, CommandCal
 	                        });
 }
 
-int Session::Connected::command(const ArgsPacker& args, CommandCallback&& callback, redisCallbackFn* fn) {
+int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback, redisCallbackFn* fn) {
 	return redisAsyncCommandArgv(
 	    mCtx.get(), fn, std::make_unique<CommandCallback>(std::move(callback)).release(), args.getArgCount(),
 	    // This const char** signature supposedly suggests that while the array itself is const, its elements are not.
@@ -160,11 +160,8 @@ Session::State& Session::getState() {
 std::ostream& operator<<(std::ostream& stream, const Session::Disconnected&) {
 	return stream << "Disconnected()";
 }
-std::ostream& operator<<(std::ostream& stream, const Session::Connecting& connecting) {
-	return stream << "Connecting(ctx: " << connecting.mCtx.get() << ")";
-}
-std::ostream& operator<<(std::ostream& stream, const Session::Connected& connected) {
-	return stream << "Connected(ctx: " << connected.mCtx.get() << ")";
+std::ostream& operator<<(std::ostream& stream, const Session::Ready& ready) {
+	return stream << std::boolalpha << "Ready(connected: " << ready.mConnected << ", ctx: " << ready.mCtx.get() << ")";
 }
 std::ostream& operator<<(std::ostream& stream, const Session::Disconnecting& disconnecting) {
 	return stream << "Disconnecting(ctx: " << disconnecting.mCtx.get() << ")";

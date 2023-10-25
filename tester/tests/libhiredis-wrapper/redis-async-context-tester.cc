@@ -33,20 +33,24 @@ void test() {
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(session.getState()));
 	bool connected = false;
 	session.onConnect([&connected](const auto& state, auto status) {
-		BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connected>(state));
+		const auto* ready = std::get_if<redis::async::Session::Ready>(&state);
+		BC_ASSERT_PTR_NOT_NULL(ready);
+		BC_ASSERT(ready->connected());
 		BC_ASSERT_CPP_EQUAL(status, REDIS_OK);
 		connected = true;
 	});
 
-	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connecting>(
-	    session.connect(root.getCPtr(), "localhost", redis.port())));
+	auto* ready =
+	    std::get_if<redis::async::Session::Ready>(&session.connect(root.getCPtr(), "localhost", redis.port()));
+	BC_HARD_ASSERT(ready != nullptr);
+	BC_ASSERT_FALSE(ready->connected());
 
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&connected]() { return connected; }));
 
-	BC_HARD_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Connected>(session.getState()));
-	auto& ready = std::get<decltype(session)::Connected>(session.getState());
+	BC_HARD_ASSERT_CPP_EQUAL(std::get_if<redis::async::Session::Ready>(&session.getState()), ready);
+	BC_HARD_ASSERT(ready->connected());
 	bool returned = false;
-	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, redis::async::Reply reply) {
+	ready->command({"HGETALL", "*"}, [&returned](decltype(session)&, redis::async::Reply reply) {
 		const auto* array = std::get_if<redis::reply::Array>(&reply);
 		BC_HARD_ASSERT_TRUE(array != nullptr);
 		BC_ASSERT_CPP_EQUAL(array->size(), 0);
@@ -56,7 +60,7 @@ void test() {
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
 	returned = false;
 
-	ready.command({"HELLO"}, [&returned](decltype(session)&, redis::async::Reply reply) {
+	ready->command({"HELLO"}, [&returned](decltype(session)&, redis::async::Reply reply) {
 		const auto* array = std::get_if<redis::reply::Array>(&reply);
 		BC_HARD_ASSERT_TRUE(array != nullptr);
 		SLOGD << "Server information: " << *array;
@@ -67,7 +71,7 @@ void test() {
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
 
 	returned = false;
-	ready.command({"HGETALL", "*"}, [&returned](decltype(session)&, redis::async::Reply reply) {
+	ready->command({"HGETALL", "*"}, [&returned](decltype(session)&, redis::async::Reply reply) {
 		const auto* array = std::get_if<redis::reply::Array>(&reply);
 		BC_HARD_ASSERT_TRUE(array != nullptr);
 		BC_ASSERT_CPP_EQUAL(array->size(), 0);
@@ -77,6 +81,17 @@ void test() {
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnecting>(session.getState()));
 	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
 	BC_ASSERT_TRUE(std::holds_alternative<redis::async::Session::Disconnected>(session.getState()));
+
+	ready = std::get_if<redis::async::Session::Ready>(&session.connect(root.getCPtr(), "localhost", redis.port()));
+	BC_HARD_ASSERT(ready != nullptr);
+
+	// Pre-connect command
+	returned = false;
+	ready->command({"HGETALL", "*"}, [&returned](decltype(session)&, redis::async::Reply reply) {
+		BC_ASSERT_TRUE(std::holds_alternative<redis::reply::Array>(reply));
+		returned = true;
+	});
+	BC_ASSERT_TRUE(asserter.iterateUpTo(1, [&returned]() { return returned; }));
 }
 
 namespace {
