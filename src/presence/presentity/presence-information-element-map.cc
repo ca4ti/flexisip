@@ -65,11 +65,14 @@ std::optional<PresenceInformationElement*> PresenceInformationElementMap::getByE
 	return nullopt;
 }
 
-void PresenceInformationElementMap::mergeInto(std::shared_ptr<PresenceInformationElementMap>& otherMap,
-                                              const std::weak_ptr<ElementMapListener>& listener) {
+void PresenceInformationElementMap::mergeInto(const std::shared_ptr<PresenceInformationElementMap>& otherMap,
+                                              const std::weak_ptr<ElementMapListener>& listener,
+                                              bool notifyOther) {
 	otherMap->mInformationElements.merge(mInformationElements);
 	otherMap->mListeners.push_back(listener);
-	otherMap->notifyListeners();
+	if (notifyOther) {
+		otherMap->notifyListeners();
+	}
 }
 
 void PresenceInformationElementMap::notifyListeners() {
@@ -103,7 +106,7 @@ std::shared_ptr<PresentityPresenceInformationListener> PresenceInformationElemen
 }
 
 shared_ptr<PresentityPresenceInformationListener>
-PresenceInformationElementMap::findPresenceInfoListener(shared_ptr<PresentityPresenceInformation>& info) {
+PresenceInformationElementMap::findPresenceInfoListener(const shared_ptr<PresentityPresenceInformation>& info) {
 	return findParentListener([&info](const shared_ptr<PresentityPresenceInformationListener>& l) {
 		return belle_sip_uri_equals(l->getTo(), info->getEntity());
 	});

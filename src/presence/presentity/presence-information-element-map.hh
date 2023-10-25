@@ -47,14 +47,18 @@ public:
 	void removeByEtag(const std::string& eTag, bool notifyOther = true);
 
 	void addParentListener(const std::shared_ptr<PresentityPresenceInformationListener>& listener);
+
 	std::shared_ptr<PresentityPresenceInformationListener>
-	findPresenceInfoListener(std::shared_ptr<PresentityPresenceInformation>& info);
+	findPresenceInfoListener(const std::shared_ptr<PresentityPresenceInformation>& info);
 
 	/**
 	 * WARNING : modify and emptied calling map
 	 */
-	void mergeInto(std::shared_ptr<PresenceInformationElementMap>& otherMap,
-	               const std::weak_ptr<ElementMapListener>& listener);
+	void mergeInto(const std::shared_ptr<PresenceInformationElementMap>& otherMap,
+	               const std::weak_ptr<ElementMapListener>& listener,
+	               bool notifyOther = true);
+
+	void notifyListeners();
 
 	const ElementMapType& getElements() const {
 		return mInformationElements;
@@ -78,8 +82,6 @@ private:
 	    : mBelleSipMainloop(belleSipMainloop), mListeners{} {
 		mListeners.push_back(initialListener);
 	};
-
-	void notifyListeners();
 
 	std::shared_ptr<PresentityPresenceInformationListener> findParentListener(
 	    std::function<bool(const std::shared_ptr<PresentityPresenceInformationListener>&)> predicate) const;

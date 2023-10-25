@@ -26,6 +26,7 @@
 #include "presence/observers/presence-info-observer.hh"
 #include "presentity-presence-information-listener.hh"
 #include "presentity-presence-information.hh"
+#include "xml/pidf+xml.hh"
 
 namespace flexisip {
 using namespace std;
@@ -42,7 +43,7 @@ shared_ptr<PresentityPresenceInformation> MapPresentityManager::getPresenceInfo(
 	return (presenceEntityInformationIt == mPresenceInformations.end()) ? nullptr : presenceEntityInformationIt->second;
 }
 
-const std::shared_ptr<PresentityPresenceInformation> MapPresentityManager::getPresenceInfo(const string& eTag) const {
+shared_ptr<PresentityPresenceInformation> MapPresentityManager::getPresenceInfo(const std::string& eTag) const {
 	auto presenceInformationsByEtagIt = mPresenceInformationsByEtag.find(eTag);
 	return (presenceInformationsByEtagIt == mPresenceInformationsByEtag.end()) ? nullptr
 	                                                                           : presenceInformationsByEtagIt->second;
@@ -91,9 +92,10 @@ void MapPresentityManager::addOrUpdateListener(shared_ptr<PresentityPresenceInfo
 
 	// notify observers that a listener is added or updated
 	for (auto& observer : mPresenceInfoObservers) {
-		observer->onListenerEvent(presenceInfo, listener);
+		observer->onListenerEvent(presenceInfo);
 	}
 
+	presenceInfo->addListenerIfNecessary(listener);
 	enableExtendedNotifyIfPossible(listener, presenceInfo);
 
 	if (expires > 0) presenceInfo->addOrUpdateListener(listener, expires);
@@ -101,9 +103,8 @@ void MapPresentityManager::addOrUpdateListener(shared_ptr<PresentityPresenceInfo
 }
 
 void MapPresentityManager::enableExtendedNotifyIfPossible(
-    shared_ptr<PresentityPresenceInformationListener>& listener,
-    shared_ptr<PresentityPresenceInformation>& presenceInfo) const {
-	presenceInfo->addListenerIfNecessary(listener);
+    const std::shared_ptr<PresentityPresenceInformationListener>& listener,
+    const std::shared_ptr<PresentityPresenceInformation>& presenceInfo) const {
 	if (!listener->extendedNotifyEnabled()) {
 		auto toPresenceInfo = getPresenceInfo(listener->getTo());
 		if (toPresenceInfo) {

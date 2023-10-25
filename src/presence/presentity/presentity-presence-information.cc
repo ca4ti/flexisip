@@ -20,13 +20,13 @@
 
 #include <functional>
 #include <memory>
-
 #include <ostream>
 
-#include "flexisip/flexisip-exception.hh"
 #include <belle-sip/belle-sip.h>
 
+#include "flexisip/flexisip-exception.hh"
 #include "flexisip/logmanager.hh"
+
 #include "presence-information-element.hh"
 #include "presence-server.hh"
 #include "presentity-manager.hh"
@@ -91,7 +91,7 @@ size_t PresentityPresenceInformation::getNumberOfInformationElements() const {
 	return mInformationElements->getSize();
 }
 shared_ptr<PresentityPresenceInformationListener>
-PresentityPresenceInformation::findPresenceInfoListener(shared_ptr<PresentityPresenceInformation>& info) {
+PresentityPresenceInformation::findPresenceInfoListener(const shared_ptr<PresentityPresenceInformation>& info) const {
 	return mInformationElements->findPresenceInfoListener(info);
 }
 string PresentityPresenceInformation::putTuples(Xsd::Pidf::Presence::TupleSequence& tuples,
@@ -196,10 +196,11 @@ void PresentityPresenceInformation::setDefaultElement() {
 void PresentityPresenceInformation::setDefaultElement(const belle_sip_uri_t* newEntity) {
 	mDefaultInformationElement = make_shared<PresenceInformationElement>(getEntity());
 
-	if (const char* newEntityAsString = belle_sip_uri_to_string(newEntity)) {
+	if (char* newEntityAsString = belle_sip_uri_to_string(newEntity)) {
 		for (auto& tup : mDefaultInformationElement->getTuples()) {
 			tup->setContact(Xsd::Pidf::Contact(newEntityAsString));
 		}
+		belle_sip_free(newEntityAsString);
 	}
 
 	mPresentityManager.handleLongtermPresence(newEntity, shared_from_this());
@@ -459,7 +460,7 @@ void PresentityPresenceInformation::notifyAll() {
 }
 
 std::shared_ptr<PresentityPresenceInformationListener> PresentityPresenceInformation::findSubscriber(
-    std::function<bool(const std::shared_ptr<PresentityPresenceInformationListener>&)> predicate) const {
+    const std::function<bool(const std::shared_ptr<PresentityPresenceInformationListener>&)>& predicate) const {
 	for (auto it = mSubscribers.begin(); it != mSubscribers.end();) {
 		auto subscriber = it->lock();
 		if (subscriber == nullptr) {
@@ -473,7 +474,7 @@ std::shared_ptr<PresentityPresenceInformationListener> PresentityPresenceInforma
 }
 
 void PresentityPresenceInformation::forEachSubscriber(
-    std::function<void(const std::shared_ptr<PresentityPresenceInformationListener>&)> doFunc) const {
+    const std::function<void(const std::shared_ptr<PresentityPresenceInformationListener>&)>& doFunc) const {
 	for (auto it = mSubscribers.begin(); it != mSubscribers.end();) {
 		auto subscriber = it->lock();
 		if (subscriber == nullptr) {
@@ -485,12 +486,20 @@ void PresentityPresenceInformation::forEachSubscriber(
 	}
 }
 
-void PresentityPresenceInformation::linkTo(std::shared_ptr<PresentityPresenceInformation> other) {
-	// We need to swap mInformationElements before merge, because merge will trigger onMapUpdate
-	auto oldMap = std::move(mInformationElements);
+void PresentityPresenceInformation::linkTo(const std::shared_ptr<PresentityPresenceInformation>& other) {
+	mInformationElements->mergeInto(other->mInformationElements, weak_from_this(), false);
 	mInformationElements = other->mInformationElements;
 
-	oldMap->mergeInto(mInformationElements, weak_from_this());
+	forEachSubscriber([this](const auto& listener) { mInformationElements->addParentListener(listener); });
+
+	forEachSubscriber([this](const auto& listener) {
+		mPresentityManager.enableExtendedNotifyIfPossible(listener, shared_from_this());
+	});
+	other->forEachSubscriber([this](const auto& listener) {
+		mPresentityManager.enableExtendedNotifyIfPossible(listener, shared_from_this());
+	});
+
+	mInformationElements->notifyListeners();
 }
 
 } /* namespace flexisip */

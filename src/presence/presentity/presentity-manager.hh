@@ -22,9 +22,12 @@
 #include <string>
 
 #include "presence/belle-sip-using.hh"
-#include "xml/pidf+xml.hh"
 
 namespace flexisip {
+
+namespace Xsd::Pidf {
+class Presence;
+}
 class PresentityPresenceInformationListener;
 class PresentityPresenceInformation;
 class PresenceInfoObserver;
@@ -44,6 +47,9 @@ public:
 	virtual void handleLongtermPresence(const belle_sip_uri_t* entityUri,
 	                                    const std::shared_ptr<PresentityPresenceInformation>& originalEntity) = 0;
 
+	virtual void
+	enableExtendedNotifyIfPossible(const std::shared_ptr<PresentityPresenceInformationListener>& listener,
+	                               const std::shared_ptr<PresentityPresenceInformation>& presenceInfo) const = 0;
 	//////// Presentities by uris
 	virtual std::shared_ptr<PresentityPresenceInformation> getPresenceInfo(const belle_sip_uri_t* identity) const = 0;
 	/**
@@ -52,7 +58,7 @@ public:
 	virtual void addPresenceInfo(const std::shared_ptr<PresentityPresenceInformation>&) = 0;
 
 	//////// Presentities by etag
-	virtual const std::shared_ptr<PresentityPresenceInformation> getPresenceInfo(const std::string& eTag) const = 0;
+	virtual std::shared_ptr<PresentityPresenceInformation> getPresenceInfo(const std::string& eTag) const = 0;
 	virtual void invalidateETag(const std::string& eTag) = 0;
 	virtual void modifyEtag(const std::string& oldEtag, const std::string& newEtag) = 0;
 	virtual void addEtag(const std::shared_ptr<PresentityPresenceInformation>& info, const std::string& etag) = 0;
@@ -60,7 +66,7 @@ public:
 	//////// Presentities listeners
 	// fixme splitting into function add and function update will avoid to iterate on subscriber list
 	virtual void addOrUpdateListener(std::shared_ptr<PresentityPresenceInformationListener>& listener, int expires) = 0;
-	void addOrUpdateListener(std::shared_ptr<PresentityPresenceInformationListener>& listener) {
+	virtual void addOrUpdateListener(std::shared_ptr<PresentityPresenceInformationListener>& listener) {
 		addOrUpdateListener(listener, -1);
 	}
 

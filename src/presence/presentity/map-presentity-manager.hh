@@ -30,13 +30,15 @@
 
 namespace flexisip {
 
+namespace Xsd::Pidf {
+class Presence;
+}
 class PresenceInfoObserver;
 class PresentityPresenceInformation;
 
 class MapPresentityManager : public PresentityManager {
 public:
-	explicit MapPresentityManager(belle_sip_stack_t* stack) : PresentityManager(stack) {
-	}
+	using PresentityManager::PresentityManager;
 
 	std::string handlePublishFor(const belle_sip_uri_t* entityUri,
 	                             const std::string& eTag,
@@ -48,10 +50,14 @@ public:
 	void handleLongtermPresence(const belle_sip_uri_t* entityUri,
 	                            const std::shared_ptr<PresentityPresenceInformation>& originalEntity) override;
 
+	void
+	enableExtendedNotifyIfPossible(const std::shared_ptr<PresentityPresenceInformationListener>& listener,
+	                               const std::shared_ptr<PresentityPresenceInformation>& presenceInfo) const override;
+
 	std::shared_ptr<PresentityPresenceInformation> getPresenceInfo(const belle_sip_uri_t* identity) const override;
 	void addPresenceInfo(const std::shared_ptr<PresentityPresenceInformation>&) override;
 
-	const std::shared_ptr<PresentityPresenceInformation> getPresenceInfo(const std::string& eTag) const override;
+	std::shared_ptr<PresentityPresenceInformation> getPresenceInfo(const std::string& eTag) const override;
 	void invalidateETag(const std::string& eTag) override;
 	void modifyEtag(const std::string& oldEtag, const std::string& newEtag) override;
 	void addEtag(const std::shared_ptr<PresentityPresenceInformation>& info, const std::string& etag) override;
@@ -65,11 +71,9 @@ public:
 	void removePresenceInfoObserver(const std::shared_ptr<PresenceInfoObserver>& observer) override;
 
 private:
-	std::map<std::string, std::shared_ptr<PresentityPresenceInformation>> mPresenceInformationsByEtag;
+	std::unordered_map<std::string, std::shared_ptr<PresentityPresenceInformation>> mPresenceInformationsByEtag;
 	std::unordered_map<const belle_sip_uri_t*, std::shared_ptr<PresentityPresenceInformation>> mPresenceInformations;
 	std::vector<std::shared_ptr<PresenceInfoObserver>> mPresenceInfoObservers;
-	void enableExtendedNotifyIfPossible(std::shared_ptr<PresentityPresenceInformationListener>& listener,
-	                                    std::shared_ptr<PresentityPresenceInformation>& presenceInfo) const;
 };
 
 } // namespace flexisip

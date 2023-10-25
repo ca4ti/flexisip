@@ -24,12 +24,12 @@
 #include <map>
 
 #include <belle-sip/belle-sip.h>
+#include <memory>
 
 #include "flexisip/flexisip-exception.hh"
 
 #include "presence-information-element-map.hh"
 #include "presence/belle-sip-using.hh"
-#include "xml/pidf+xml.hh"
 
 namespace flexisip {
 
@@ -148,13 +148,13 @@ public:
 	 * return if one of the subscribers subscribed for a presence information
 	 */
 	std::shared_ptr<PresentityPresenceInformationListener>
-	findPresenceInfoListener(std::shared_ptr<PresentityPresenceInformation>& info);
+	findPresenceInfoListener(const std::shared_ptr<PresentityPresenceInformation>& info) const;
 
 	void onMapUpdate() override {
 		notifyAll();
 	}
 
-	void linkTo(std::shared_ptr<PresentityPresenceInformation> other);
+	void linkTo(const std::shared_ptr<PresentityPresenceInformation>& other);
 
 private:
 	PresentityPresenceInformation(const belle_sip_uri_t* entity,
@@ -174,10 +174,10 @@ private:
 	 */
 	void notifyAll();
 
-	std::shared_ptr<PresentityPresenceInformationListener>
-	findSubscriber(std::function<bool(const std::shared_ptr<PresentityPresenceInformationListener>&)> predicate) const;
-	void
-	forEachSubscriber(std::function<void(const std::shared_ptr<PresentityPresenceInformationListener>&)> doFunc) const;
+	std::shared_ptr<PresentityPresenceInformationListener> findSubscriber(
+	    const std::function<bool(const std::shared_ptr<PresentityPresenceInformationListener>&)>& predicate) const;
+	void forEachSubscriber(
+	    const std::function<void(const std::shared_ptr<PresentityPresenceInformationListener>&)>& doFunc) const;
 
 	const belle_sip_uri_t* mEntity;
 	PresentityManager& mPresentityManager;
