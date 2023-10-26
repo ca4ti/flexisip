@@ -101,6 +101,8 @@ public:
 	State& connect(su_root_t*, const std::string_view& address, int port);
 	State& disconnect();
 
+	bool isConnected();
+
 	void onConnect(std::function<void(int status)>&& handler) {
 		mOnConnect = std::move(handler);
 	}

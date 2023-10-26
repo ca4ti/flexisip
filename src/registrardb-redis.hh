@@ -32,6 +32,8 @@
 
 #include "agent.hh"
 #include "eventlogs/writers/event-log-writer.hh"
+#include "libhiredis-wrapper/redis-async-context.hh"
+#include "libhiredis-wrapper/redis-reply.hh"
 #include "recordserializer.hh"
 #include "registrar/binding-parameters.hh"
 #include "registrar/change-set.hh"
@@ -114,10 +116,11 @@ struct RedisRegisterContext {
 	unsigned long token = 0;
 	su_timer_t* mRetryTimer = nullptr;
 	int mRetryCount = 0;
+	bool mUpdateExpire = false;
+	bool succeeded = false;
 	MsgSip mMsg;
 	BindingParameters mBindingParameters;
 	std::string mUniqueIdToFetch;
-	bool mUpdateExpire = false;
 
 	template <typename T>
 	RedisRegisterContext(RegistrarDbRedisAsync* s, T&& url, const std::shared_ptr<ContactUpdateListener>& listener)
@@ -133,6 +136,7 @@ struct RedisRegisterContext {
 		// Note that MsgSip copy constructor is not invoked in order to avoid a deep copy.
 		// Instead, mMsg just takes a ref on the underlying sofia-sip msg_t.
 	}
+	~RedisRegisterContext();
 };
 
 class RegistrarDbRedisAsync : public RegistrarDb {
@@ -140,18 +144,19 @@ public:
 	friend class redis::RedisCommandTimer;
 
 	RegistrarDbRedisAsync(Agent* agent, RedisParameters params);
-	RegistrarDbRedisAsync(const std::string& preferredRoute,
-	                      const std::shared_ptr<sofiasip::SuRoot>& root,
+	RegistrarDbRedisAsync(const std::shared_ptr<sofiasip::SuRoot>& root,
 	                      RecordSerializer* serializer,
-	                      RedisParameters params);
+	                      RedisParameters params,
+	                      Agent* = nullptr);
 	~RegistrarDbRedisAsync() override;
 
 	void fetchExpiringContacts(time_t startTimestamp,
 	                           float threshold,
 	                           std::function<void(std::vector<ExtendedContact>&&)>&& callback) const override;
 
-	bool connect();
-	bool disconnect();
+	std::optional<std::tuple<redis::async::Session::Ready&, redisAsyncContext&>> connect();
+	void asyncDisconnect();
+	void forceDisconnect();
 
 protected:
 	void doBind(const MsgSip& msg,
@@ -168,8 +173,8 @@ protected:
 	void publish(const std::string& topic, const std::string& uid) override;
 
 private:
-	static void sConnectCallback(const redisAsyncContext* c, int status);
-	static void sDisconnectCallback(const redisAsyncContext* c, int status);
+	friend class RegistrarDb;
+
 	static void sSubscribeConnectCallback(const redisAsyncContext* c, int status);
 	static void sSubscribeDisconnectCallback(const redisAsyncContext* c, int status);
 	static void sPublishCallback(redisAsyncContext* c, void* r, void* privdata);
@@ -177,21 +182,20 @@ private:
 	static void sBindRetry(void* unused, su_timer_t* t, void* ud);
 	bool isConnected();
 	void setWritable(bool value);
+	redis::async::Session::Ready* tryGetCommandSession();
 
-	friend class RegistrarDb;
-
-	void serializeAndSendToRedis(RedisRegisterContext* data, forwardFn* forward_fn);
-	bool handleRedisStatus(const std::string& desc, int redisStatus, RedisRegisterContext* data);
+	void serializeAndSendToRedis(RedisRegisterContext&, redis::async::Session::CommandCallback&&);
+	bool handleRedisStatus(const std::string& desc, int redisStatus, std::unique_ptr<RedisRegisterContext>&& data);
 	void subscribeTopic(const std::string& topic);
 	void subscribeAll();
 	void subscribeToKeyExpiration();
-	static std::vector<std::unique_ptr<ExtendedContact>> parseContacts(redisReply*);
+	static std::vector<std::unique_ptr<ExtendedContact>> parseContacts(const redis::reply::Array&);
 
 	/* callbacks */
 	void handleAuthReply(const redisReply* reply);
-	void handleBind(redisReply* reply, RedisRegisterContext* data);
-	void handleClear(redisReply* reply, RedisRegisterContext* data);
-	void handleFetch(redisReply* reply, RedisRegisterContext* data);
+	void handleBind(redis::async::Reply reply, std::unique_ptr<RedisRegisterContext>&& data);
+	void handleClear(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& data);
+	void handleFetch(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& data);
 
 	/**
 	 * This callback is called when the Redis instance answered our "INFO replication" message.
@@ -199,27 +203,22 @@ private:
 	 * a slave, and we react accordingly.
 	 * @param str Redis answer
 	 */
-	void handleReplicationInfoReply(const char* str);
-	void handleMigration(redisReply* reply, RedisRegisterContext* data);
-	void handleRecordMigration(redisReply* reply, RedisRegisterContext* data);
-	void onConnect(const redisAsyncContext* c, int status);
-	void onDisconnect(const redisAsyncContext* c, int status);
+	void handleReplicationInfoReply(const redis::reply::String& str);
+	void handleMigration(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& data);
+	void handleRecordMigration(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& data);
 	void onSubscribeConnect(const redisAsyncContext* c, int status);
 	void onSubscribeDisconnect(const redisAsyncContext* c, int status);
 
 	/* replication */
-	void getReplicationInfo();
+	void getReplicationInfo(redis::async::Session::Ready&);
 	void updateSlavesList(const std::map<std::string, std::string>& redisReply);
 	void tryReconnect();
 
 	/* static handlers */
 	// static void sHandleAorGetReply(struct redisAsyncContext *, void *r, void *privdata);
 	static void sHandleAuthReply(redisAsyncContext* ac, void* r, void* privdata);
-	static void sHandleBindStart(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
-	static void sHandleBindFinish(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
 	static void sHandleClear(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
 	static void sHandleFetch(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
-	static void sHandleReplicationInfoReply(redisAsyncContext* ac, void* r, void* privdata);
 	static void sHandleMigration(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
 	static void sHandleRecordMigration(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
 	static void sHandleSubcommandReply(redisAsyncContext*, redisReply* reply, std::string* cmd);
@@ -234,7 +233,7 @@ private:
 	 */
 	void onTryReconnectTimer();
 
-	redisAsyncContext* mCommandSession{nullptr};
+	redis::async::Session mCommandSession{};
 	// From https://redis.io/commands/subscribe/
 	// "Once the client enters the subscribed state it is not supposed to issue any other commands, except for
 	// additional SUBSCRIBE, SSUBSCRIBE, PSUBSCRIBE, UNSUBSCRIBE, SUNSUBSCRIBE, PUNSUBSCRIBE, PING, RESET and QUIT

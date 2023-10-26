@@ -55,7 +55,7 @@ void mContext_should_be_checked_on_serializeAndSendToRedis() {
 	auto listener = std::make_shared<OperationFailedListener>();
 
 	registrar.bind(SipUri(placeholder), sip_contact_make(home.home(), placeholder), bindParams, listener);
-	registrar.disconnect(); // disconnecting before the previous bind operation finishes
+	registrar.asyncDisconnect(); // disconnecting before the previous bind operation finishes
 
 	// The bind() ends in error, but there should be no segfault
 	BC_ASSERT_TRUE(asserter.iterateUpTo(30, [&finished = listener->finished] { return finished; }));

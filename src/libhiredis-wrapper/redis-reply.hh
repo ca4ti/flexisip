@@ -20,14 +20,22 @@ public:
 	friend std::ostream& operator<<(std::ostream&, const Error&);
 };
 using Integer = decltype(redisReply::integer);
+class Disconnected {
+public:
+	friend std::ostream& operator<<(std::ostream&, const Disconnected&);
+};
 class Array;
 
-using Reply = std::variant<String, Array, Integer, Error>;
+using Reply = std::variant<String, Array, Integer, Error, Disconnected>;
 
 Reply tryFrom(const redisReply*);
 
+class ArrayOfPairs;
+
 class Array {
 public:
+	using Element = std::variant<String, Array, Integer>;
+
 	class Iterator {
 	public:
 		Iterator(const redisReply* const* ptr) : ptr(ptr) {
@@ -39,9 +47,7 @@ public:
 		bool operator!=(const Iterator& other) const {
 			return ptr != other.ptr;
 		}
-		Reply operator*() const {
-			return tryFrom(*ptr);
-		}
+		Element operator*();
 
 	private:
 		const redisReply* const* ptr;
@@ -61,13 +67,50 @@ public:
 		return mCount;
 	}
 
-	Reply operator[](std::size_t) const;
+	Element operator[](std::size_t) const;
+
+	ArrayOfPairs pairwise() const;
 
 	friend std::ostream& operator<<(std::ostream&, const Array&);
 
-private:
+protected:
 	const redisReply* const* mElements;
 	const std::size_t mCount;
+};
+
+class ArrayOfPairs : Array {
+public:
+	class Iterator {
+	public:
+		Iterator(const redisReply* const* ptr) : ptr(ptr) {
+		}
+		Iterator operator++() {
+			ptr += 2;
+			return *this;
+		}
+		bool operator!=(const Iterator& other) const {
+			return ptr != other.ptr;
+		}
+		std::pair<Element, Element> operator*();
+
+	private:
+		const redisReply* const* ptr;
+	};
+
+	explicit ArrayOfPairs(const Array&);
+
+	Iterator begin() const {
+		return mElements;
+	}
+	Iterator end() const {
+		return mElements + mCount - 1;
+	}
+
+	std::size_t size() const {
+		return mCount / 2;
+	}
+
+	std::pair<Element, Element> operator[](std::size_t) const;
 };
 
 } // namespace flexisip::redis::reply

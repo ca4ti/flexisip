@@ -24,7 +24,7 @@ public:
 	RedisCommandTimer() = default;
 
 	int send(redisAsyncContext* asyncContext, redisCallbackFn* callback, void* data, const char* format, ...);
-	int send(redisAsyncContext* asyncContext, redisCallbackFn* callback, void* data, ArgsPacker& args);
+	int send(redisAsyncContext* asyncContext, redisCallbackFn* callback, void* data, const ArgsPacker& args);
 
 private:
 	class TimedRedisCommand {

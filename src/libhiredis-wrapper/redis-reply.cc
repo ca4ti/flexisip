@@ -6,16 +6,37 @@
 
 #include <cstddef>
 #include <ostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 #include "compat/hiredis/async.h"
 #include "utils/variant-utils.hh"
 
 namespace flexisip::redis::reply {
+namespace {
+
+Array::Element tryElementFrom(const redisReply* reply) {
+	return std::visit(
+	    [](auto&& element) -> Array::Element {
+		    if constexpr (std::is_constructible_v<Array::Element, decltype(element)>) {
+			    return std::move(element);
+		    } else {
+			    std::ostringstream msg{};
+			    msg << "Unexpected type in Redis array element: " << element;
+			    throw std::runtime_error{msg.str()};
+		    }
+	    },
+	    tryFrom(reply));
+}
+
+} // namespace
 
 Reply tryFrom(const redisReply* reply) {
+	if (!reply) return Disconnected{};
 	switch (reply->type) {
 		case REDIS_REPLY_ERROR: {
 			return Error{{reply->str, reply->len}};
@@ -36,11 +57,14 @@ Reply tryFrom(const redisReply* reply) {
 	}
 }
 
-Reply Array::operator[](std::size_t index) const {
+Array::Element Array::operator[](std::size_t index) const {
 	if (mCount <= index) {
 		throw std::out_of_range{"Index out of range on Redis array reply"};
 	}
-	return tryFrom(mElements[index]);
+	return tryElementFrom(mElements[index]);
+}
+Array::Element Array::Iterator::operator*() {
+	return tryElementFrom(*ptr);
 }
 
 std::ostream& operator<<(std::ostream& stream, const Error& error) {
@@ -58,6 +82,29 @@ std::ostream& operator<<(std::ostream& stream, const Array& array) {
 		}
 	}
 	return stream << "}";
+}
+std::ostream& operator<<(std::ostream& stream, const Disconnected&) {
+	return stream << "redis::Disconnected()";
+}
+
+ArrayOfPairs Array::pairwise() const {
+	return ArrayOfPairs{*this};
+}
+
+ArrayOfPairs::ArrayOfPairs(const Array& array) : Array(array) {
+	if (mCount % 2 != 0) {
+		throw std::logic_error{"Cannot view uneven Redis array as array of pairs"};
+	}
+}
+
+std::pair<Array::Element, Array::Element> ArrayOfPairs::operator[](std::size_t index) const {
+	if (mCount - 1 <= index) {
+		throw std::out_of_range{"Index out of range on Redis tuples array reply"};
+	}
+	return {tryElementFrom(mElements[index]), tryElementFrom(mElements[index + 1])};
+}
+std::pair<Array::Element, Array::Element> ArrayOfPairs::Iterator::operator*() {
+	return {tryElementFrom(*ptr), tryElementFrom(*(ptr + 1))};
 }
 
 } // namespace flexisip::redis::reply

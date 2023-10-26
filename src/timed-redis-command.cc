@@ -61,7 +61,7 @@ int RedisCommandTimer::send(
 	return status;
 }
 
-int RedisCommandTimer::send(redisAsyncContext* redisContext, redisCallbackFn* callback, void* data, ArgsPacker& args) {
+int RedisCommandTimer::send(redisAsyncContext* redisContext, redisCallbackFn* callback, void* data, const ArgsPacker& args) {
 	auto* context = mPendingCommands.emplace_back(new TimedRedisCommand(callback, data, args.toString())).get();
 
 	int status = redisAsyncCommandArgv(redisContext, sLogTimeAndCallWrapped, context, args.getArgCount(),

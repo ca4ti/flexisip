@@ -119,7 +119,6 @@ int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback) 
 	return command(args, std::move(callback),
 	               [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
 		               std::unique_ptr<CommandCallback> commandContext{static_cast<CommandCallback*>(rawCommandData)};
-		               if (reply == nullptr) return; // Session is being freed
 
 		               auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
 		               (*commandContext)(sessionContext, reply::tryFrom(static_cast<const redisReply*>(reply)));
@@ -174,6 +173,11 @@ void Session::ContextDeleter::operator()(redisAsyncContext* ctx) noexcept {
 	}
 
 	redisAsyncFree(ctx);
+}
+
+bool Session::isConnected() {
+	return Match(mState).against([](const Ready& ready) { return ready.connected(); },
+	                             [](const auto&) { return false; });
 }
 
 } // namespace flexisip::redis::async
