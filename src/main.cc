@@ -76,6 +76,7 @@
 #include "cli.hh"
 #include "configdumper.hh"
 #include "etchosts.hh"
+#include "eventlogs/writers/event-log-writer.hh"
 #include "monitor.hh"
 #include "stun.hh"
 

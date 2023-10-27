@@ -38,7 +38,7 @@ struct BelleSipSourceCancelingDeleter {
 	constexpr BelleSipSourceCancelingDeleter() noexcept = default;
 	constexpr BelleSipSourceCancelingDeleter(BelleSipObjectDeleter<belle_sip_source_t>&&) noexcept {
 	}
-	void operator()(belle_sip_source_t* source) noexcept {
+	void operator()(belle_sip_source_t* source) const noexcept {
 		belle_sip_source_cancel(source);
 		belle_sip_object_unref(source);
 	}

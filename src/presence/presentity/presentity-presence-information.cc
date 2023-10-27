@@ -27,10 +27,10 @@
 #include "flexisip/flexisip-exception.hh"
 #include "flexisip/logmanager.hh"
 
-#include "presence-information-element.hh"
-#include "presence-server.hh"
-#include "presentity-manager.hh"
-#include "presentity-presence-information-listener.hh"
+#include "presence/presence-server.hh"
+#include "presence/presentity/presence-information-element.hh"
+#include "presence/presentity/presentity-manager.hh"
+#include "presence/presentity/presentity-presence-information-listener.hh"
 #include "utils/string-utils.hh"
 #include "utils/xsd-utils.hh"
 #include "xml/data-model.hh"
@@ -63,7 +63,7 @@ PresentityPresenceInformation::PresentityPresenceInformation(const belle_sip_uri
                                                              PresentityManager& presentityManager,
                                                              belle_sip_main_loop_t* mainloop)
     : mEntity((belle_sip_uri_t*)belle_sip_object_clone(BELLE_SIP_OBJECT(entity))),
-      mPresentityManager(presentityManager), mBelleSipMainloop(mainloop), mInformationElements{} {
+      mPresentityManager(presentityManager), mBelleSipMainloop(mainloop) {
 	belle_sip_object_ref(mainloop);
 	belle_sip_object_ref((void*)mEntity);
 }
@@ -138,7 +138,7 @@ string PresentityPresenceInformation::setOrUpdate(Xsd::Pidf::Presence::TupleSequ
 	}
 
 	if (!informationElement) { // create a new one if needed
-		informationElement = new PresenceInformationElement(tuples, person, mBelleSipMainloop);
+		informationElement = new PresenceInformationElement(tuples, person);
 		SLOGD << "Creating presence information element [" << informationElement << "]  for presentity [" << *this
 		      << "]";
 	}
@@ -170,7 +170,7 @@ string PresentityPresenceInformation::setOrUpdate(Xsd::Pidf::Presence::TupleSequ
 	informationElement->setExpiresTimer(std::move(timer));
 
 	// modify global etag list
-	if (eTag && eTag->size() > 0) {
+	if (eTag && !eTag->empty()) {
 		mPresentityManager.modifyEtag(*eTag, generatedETag);
 		mInformationElements->removeByEtag(*eTag, false);
 	} else {
@@ -303,17 +303,17 @@ void PresentityPresenceInformation::removeListener(const shared_ptr<PresentityPr
 void PresentityPresenceInformation::addCapability(const std::string& capability) {
 	if (mCapabilities.empty()) {
 		mCapabilities = capability;
-	} else if (mCapabilities.find(capability) == mCapabilities.npos) {
+	} else if (mCapabilities.find(capability) == string::npos) {
 		mCapabilities += ", " + capability;
 		notifyAll();
 	}
 }
 
-bool PresentityPresenceInformation::hasDefaultElement() {
+bool PresentityPresenceInformation::hasDefaultElement() const {
 	return !!mDefaultInformationElement;
 }
 
-bool PresentityPresenceInformation::isKnown() {
+bool PresentityPresenceInformation::isKnown() const {
 	return !mInformationElements->isEmpty() || hasDefaultElement();
 }
 
@@ -325,27 +325,25 @@ string PresentityPresenceInformation::getPidf(bool extended) {
 		belle_sip_free(entity);
 		list<string> tupleList;
 		if (extended) {
-			for (const auto& element : mInformationElements->getElements()) {
+			for (const auto& [eTag, infoElement] : mInformationElements->getElements()) {
 				// copy pidf
-				for (const unique_ptr<Xsd::Pidf::Tuple>& tup : element.second->getTuples()) {
+				for (const unique_ptr<Xsd::Pidf::Tuple>& tup : infoElement->getTuples()) {
 					// check for multiple tupple id, may happend with buggy presence publisher
-					if (find(tupleList.begin(), tupleList.end(), tup.get()->getId()) == tupleList.end()) {
+					if (find(tupleList.begin(), tupleList.end(), tup->getId()) == tupleList.end()) {
 						presence.getTuple().push_back(*tup);
-						tupleList.push_back(tup.get()->getId());
+						tupleList.push_back(tup->getId());
 					} else {
-						SLOGW << "Already existing tuple id [" << tup.get()->getId() << " for [" << *this
-						      << "], skipping";
+						SLOGW << "Already existing tuple id [" << tup->getId() << " for [" << *this << "], skipping";
 					}
 				}
 				// copy extensions
-				Xsd::DataModel::Person dm_person = element.second->getPerson();
-				for (Xsd::DataModel::Person::ActivitiesIterator activity = dm_person.getActivities().begin();
-				     activity != dm_person.getActivities().end(); activity++) {
+				Xsd::DataModel::Person dm_person = infoElement->getPerson();
+				for (const auto& activity : dm_person.getActivities()) {
 					if (!presence.getPerson()) {
-						Xsd::DataModel::Person person = Xsd::DataModel::Person(dm_person.getId());
+						auto person = Xsd::DataModel::Person(dm_person.getId());
 						presence.setPerson(person);
 					}
-					presence.getPerson()->getActivities().push_back(*activity);
+					presence.getPerson()->getActivities().push_back(activity);
 				}
 
 				/*
@@ -376,17 +374,16 @@ string PresentityPresenceInformation::getPidf(bool extended) {
 				size_t pos = capability.find("/");
 				const string& capabilityName = (pos == string::npos) ? capability : capability.substr(0, pos);
 				const string& capabilityVersion = (pos == string::npos) ? "1.0" : capability.substr(pos + 1);
-				const auto& it = mAddedCapabilities.find(capabilityName);
-				if (it != mAddedCapabilities.cend()) {
+				if (const auto& it = mAddedCapabilities.find(capabilityName); it != mAddedCapabilities.cend()) {
 					if (std::stof(it->second) >= std::stof(capabilityVersion)) continue;
 
 					mAddedCapabilities.erase(it);
 				}
-				mAddedCapabilities.insert(make_pair(capabilityName, capabilityVersion));
+				mAddedCapabilities.try_emplace(capabilityName, capabilityVersion);
 			}
 			for (const auto& cap : mAddedCapabilities) {
 				Xsd::Pidf::Tuple::ServiceDescriptionType service(cap.first, cap.second);
-				auto capaPredicate = [cap](Xsd::Pidf::Tuple::ServiceDescriptionType serviceDescription) {
+				auto capaPredicate = [&cap](Xsd::Pidf::Tuple::ServiceDescriptionType serviceDescription) {
 					return (cap.first == serviceDescription.getServiceId()) &&
 					       (cap.second == serviceDescription.getVersion());
 				};
@@ -399,13 +396,12 @@ string PresentityPresenceInformation::getPidf(bool extended) {
 			// copy extensions of default element, only if no elements were given previously.
 			if (mInformationElements->isEmpty() || !extended) {
 				Xsd::DataModel::Person dm_person = mDefaultInformationElement->getPerson();
-				for (Xsd::DataModel::Person::ActivitiesIterator activity = dm_person.getActivities().begin();
-				     activity != dm_person.getActivities().end(); activity++) {
+				for (const auto& activity : dm_person.getActivities()) {
 					if (!presence.getPerson()) {
-						Xsd::DataModel::Person person = Xsd::DataModel::Person(dm_person.getId());
+						auto person = Xsd::DataModel::Person(dm_person.getId());
 						presence.setPerson(person);
 					}
-					presence.getPerson()->getActivities().push_back(*activity);
+					presence.getPerson()->getActivities().push_back(activity);
 				}
 
 				/*
@@ -415,7 +411,7 @@ string PresentityPresenceInformation::getPidf(bool extended) {
 				 */
 				if (!presence.getPerson()->getTimestamp() && mInformationElements->getLastActivity()) {
 					if (!presence.getPerson()) {
-						Xsd::DataModel::Person person = Xsd::DataModel::Person(dm_person.getId());
+						auto person = Xsd::DataModel::Person(dm_person.getId());
 						presence.setPerson(person);
 					}
 					time_t tt = system_clock::to_time_t(mInformationElements->getLastActivity().value());
@@ -427,12 +423,11 @@ string PresentityPresenceInformation::getPidf(bool extended) {
 				}
 			}
 		}
-		if (presence.getTuple().size() == 0) {
+		if (presence.getTuple().empty()) {
 			Xsd::Pidf::Note value;
 			Xsd::Namespace::Lang lang("en");
 			value += "No presence information available yet";
 			value.setLang(lang);
-			// value.lang("en");
 			presence.getNote().push_back(value);
 		}
 

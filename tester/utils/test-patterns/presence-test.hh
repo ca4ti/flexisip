@@ -23,6 +23,7 @@
 #include "flexisip/configmanager.hh"
 
 #include "agent.hh"
+#include "presence/observers/presence-auth-db-listener.hh"
 #include "presence/observers/presence-longterm.hh"
 #include "presence/presence-server.hh"
 #include "registrardb-test.hh"

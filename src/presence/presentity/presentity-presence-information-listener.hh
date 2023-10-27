@@ -32,9 +32,7 @@
 
 namespace flexisip {
 
-class PresentityManager;
 class PresentityPresenceInformation;
-class PresenceInformationElement;
 
 class PresentityPresenceInformationListener {
 public:
@@ -51,9 +49,9 @@ public:
 	}
 
 	void enableExtendedNotify(bool enable);
-	bool extendedNotifyEnabled();
+	bool extendedNotifyEnabled() const;
 	void enableBypass(bool enable);
-	bool bypassEnabled();
+	bool bypassEnabled() const;
 	/*returns presentity uri associated to this Listener*/
 	virtual const belle_sip_uri_t* getPresentityUri() const = 0;
 	virtual std::string getName() const {

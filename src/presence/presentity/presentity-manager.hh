@@ -21,16 +21,15 @@
 #include <memory>
 #include <string>
 
-#include "presence/belle-sip-using.hh"
+#include "belle-sip-using.hh"
+#include "presence/observers/presence-info-observer.hh"
+#include "presence/presentity/presentity-presence-information.hh"
 
 namespace flexisip {
 
 namespace Xsd::Pidf {
 class Presence;
 }
-class PresentityPresenceInformationListener;
-class PresentityPresenceInformation;
-class PresenceInfoObserver;
 
 class PresentityManager {
 public:
@@ -75,8 +74,6 @@ public:
 	virtual void addOrUpdateListeners(std::list<std::shared_ptr<PresentityPresenceInformationListener>>& listener) {
 		addOrUpdateListeners(listener, -1);
 	};
-	// void addListenerIfNecessary(std::shared_ptr<PresentityPresenceInformationListener>& listerner); TODO, presenties
-	// ?
 
 	virtual void removeListener(const std::shared_ptr<PresentityPresenceInformationListener>& listener) = 0;
 

@@ -22,8 +22,8 @@
 #include <string>
 #include <unordered_map>
 
-#include "presence-information-element.hh"
-#include "presentity-presence-information-listener.hh"
+#include "presence/presentity/presence-information-element.hh"
+#include "presence/presentity/presentity-presence-information-listener.hh"
 
 namespace flexisip {
 class ElementMapListener {
@@ -79,7 +79,7 @@ public:
 private:
 	explicit PresenceInformationElementMap(belle_sip_main_loop_t* belleSipMainloop,
 	                                       const std::weak_ptr<ElementMapListener>& initialListener)
-	    : mBelleSipMainloop(belleSipMainloop), mListeners{} {
+	    : mBelleSipMainloop(belleSipMainloop) {
 		mListeners.push_back(initialListener);
 	};
 
@@ -88,7 +88,7 @@ private:
 
 	belle_sip_main_loop_t* mBelleSipMainloop;
 	ElementMapType mInformationElements;
-	std::vector<std::weak_ptr<ElementMapListener>> mListeners;
+	std::vector<std::weak_ptr<ElementMapListener>> mListeners{};
 	std::optional<std::chrono::system_clock::time_point> mLastActivity = std::nullopt;
 	BelleSipSourcePtr mLastActivityTimer = nullptr;
 

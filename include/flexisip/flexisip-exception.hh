@@ -32,12 +32,15 @@ namespace flexisip {
 class FlexisipException : public BctbxException {
 public:
 	FlexisipException() = default;
-	FlexisipException(const std::string &message): BctbxException(message) {}
-	FlexisipException(const char *message): BctbxException(message) {}
-	virtual ~FlexisipException() throw() {}
-	FlexisipException(const FlexisipException &other): BctbxException(other) {}
-	
-	template <typename T2> FlexisipException &operator<<(const T2 &val) {
+	explicit FlexisipException(const std::string& message) : BctbxException(message) {
+	}
+	explicit FlexisipException(const char* message) : BctbxException(message) {
+	}
+	~FlexisipException() throw() override = default;
+	FlexisipException(const FlexisipException& other) = default;
+
+	template <typename T2>
+	FlexisipException& operator<<(const T2& val) {
 		BctbxException::operator<<(val);
 		return *this;
 	}
@@ -45,4 +48,4 @@ public:
 
 #define FLEXISIP_EXCEPTION FlexisipException() << " " << __FILE__ << ":" << __LINE__ << " "
 
-}
+} // namespace flexisip

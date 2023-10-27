@@ -28,11 +28,11 @@ namespace flexisip {
 
 class BelleSipSignalingException : public SignalingException {
 public:
-	BelleSipSignalingException(int statusCode,
-	                           std::list<belle_sip_header_t*> headers = std::list<belle_sip_header_t*>());
+	explicit BelleSipSignalingException(int statusCode,
+	                                    std::list<belle_sip_header_t*> headers = std::list<belle_sip_header_t*>());
 	BelleSipSignalingException(int statusCode, belle_sip_header_t* header);
 	BelleSipSignalingException(const BelleSipSignalingException& other);
-	virtual ~BelleSipSignalingException() throw();
+	~BelleSipSignalingException() throw() override;
 	const std::list<belle_sip_header_t*>& getHeaders() const;
 	template <typename T2>
 	BelleSipSignalingException& operator<<(const T2& val) {

@@ -23,14 +23,15 @@
 
 namespace flexisip {
 
-class PresentityPresenceInformation; // forward declare class
+// Used in main.cc, use forward declaration
+class PresentityPresenceInformation;
 
 // Purpose of this class is to be notified when a presence info is created or when a new listener is added for a
 // presence info. Used by long term presence
 class PresenceInfoObserver {
 public:
-	PresenceInfoObserver(){};
-	virtual ~PresenceInfoObserver(){};
+	PresenceInfoObserver() = default;
+	virtual ~PresenceInfoObserver() = default;
 	// notified when a listener is added or refreshed
 	virtual void onListenerEvent(const std::shared_ptr<PresentityPresenceInformation>& info) const = 0;
 	// notified when a listener is added or refreshed

@@ -359,7 +359,7 @@ public:
 		newEntryPointer->setParent(this);
 		for (auto& entry : mEntries) {
 			if (entry->getName() == newEntry->getName()) {
-				entry = move(newEntry);
+				entry = std::move(newEntry);
 				return newEntryPointer;
 			}
 		}

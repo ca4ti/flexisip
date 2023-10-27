@@ -26,15 +26,13 @@
 #include <vector>
 
 #include "presence/belle-sip-using.hh"
-#include "presentity-manager.hh"
+#include "presence/presentity/presentity-manager.hh"
 
 namespace flexisip {
 
 namespace Xsd::Pidf {
 class Presence;
 }
-class PresenceInfoObserver;
-class PresentityPresenceInformation;
 
 class MapPresentityManager : public PresentityManager {
 public:

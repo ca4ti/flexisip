@@ -28,14 +28,12 @@
 
 #include "flexisip/flexisip-exception.hh"
 
-#include "presence-information-element-map.hh"
 #include "presence/belle-sip-using.hh"
+#include "presence/presentity/presence-information-element-map.hh"
 
 namespace flexisip {
 
 class PresentityManager;
-class PresenceInformationElement;
-class PresentityPresenceInformationListener;
 
 /**
  * Presence Information is the key class representing a presentity. This class can be either created by a Publish for a
@@ -47,7 +45,7 @@ class PresentityPresenceInformation : public std::enable_shared_from_this<Presen
 public:
 	static std::shared_ptr<PresentityPresenceInformation>
 	make(const belle_sip_uri_t* entity, PresentityManager& presentityManager, belle_sip_main_loop_t* ml);
-	virtual ~PresentityPresenceInformation();
+	~PresentityPresenceInformation() override;
 
 	/*
 	 * store tuples a new tupple;
@@ -91,10 +89,10 @@ public:
 
 	const belle_sip_uri_t* getEntity() const;
 
-	const std::string& getName() {
+	const std::string& getName() const {
 		return mName;
 	}
-	void setName(const std::string& name) {
+	void setName(std::string_view name) {
 		mName = name;
 	}
 	void addCapability(const std::string& capability);
@@ -122,12 +120,12 @@ public:
 	/*
 	 * return true if a presence info is already known from a publish
 	 */
-	bool isKnown();
+	bool isKnown() const;
 
 	/*
 	 * return true if a presence info has a default presence value previously set by setDefaultElement
 	 */
-	bool hasDefaultElement();
+	bool hasDefaultElement() const;
 
 	/*
 	 * return number of current listeners (I.E subscriber)
@@ -184,7 +182,7 @@ private:
 	belle_sip_main_loop_t* mBelleSipMainloop;
 
 	// Tuples ordered by Etag.
-	std::shared_ptr<PresenceInformationElementMap> mInformationElements;
+	std::shared_ptr<PresenceInformationElementMap> mInformationElements{};
 
 	// list of subscribers function to be called when a tuple changed
 	mutable std::list<std::weak_ptr<PresentityPresenceInformationListener>> mSubscribers;

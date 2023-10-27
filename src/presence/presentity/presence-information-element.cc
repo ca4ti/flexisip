@@ -37,9 +37,7 @@ using namespace std::chrono;
 namespace flexisip {
 
 PresenceInformationElement::PresenceInformationElement(Xsd::Pidf::Presence::TupleSequence* tuples,
-                                                       Xsd::DataModel::Person* person,
-                                                       belle_sip_main_loop_t* mainLoop)
-    : mDomDocument(::xsd::cxx::xml::dom::create_document<char>()), mBelleSipMainloop(mainLoop) {
+                                                       Xsd::DataModel::Person* person) {
 	for (auto tupleIt = tuples->begin(); tupleIt != tuples->end();) {
 		SLOGD << "Adding tuple id [" << tupleIt->getId() << "] to presence info element [" << this << "]";
 		unique_ptr<Xsd::Pidf::Tuple> r;
@@ -54,15 +52,14 @@ PresenceInformationElement::PresenceInformationElement(Xsd::Pidf::Presence::Tupl
 	}
 }
 
-PresenceInformationElement::PresenceInformationElement(const belle_sip_uri_t* contact)
-    : mDomDocument(::xsd::cxx::xml::dom::create_document<char>()) {
+PresenceInformationElement::PresenceInformationElement(const belle_sip_uri_t* contact) {
 	char* contact_as_string = belle_sip_uri_to_string(contact);
 	time_t t;
 	time(&t);
 	struct tm* now = gmtime(&t);
 	Xsd::Pidf::Status status;
 	status.setBasic(Xsd::Pidf::Basic("open"));
-	unique_ptr<Xsd::Pidf::Tuple> tup(new Xsd::Pidf::Tuple(status, string(generatePresenceId())));
+	auto tup = std::make_unique<Xsd::Pidf::Tuple>(status, string(generatePresenceId()));
 	tup->setTimestamp(Xsd::XmlSchema::DateTime(now->tm_year + 1900, now->tm_mon + 1, now->tm_mday, now->tm_hour,
 	                                           now->tm_min, now->tm_sec));
 	tup->setContact(Xsd::Pidf::Contact(contact_as_string));

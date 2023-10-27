@@ -24,13 +24,13 @@ using namespace std::chrono;
 
 namespace flexisip {
 
-bool PresentityPresenceInformationListener::extendedNotifyEnabled() {
+bool PresentityPresenceInformationListener::extendedNotifyEnabled() const {
 	return mExtendedNotify || bypassEnabled();
 }
 void PresentityPresenceInformationListener::enableExtendedNotify(bool enable) {
 	mExtendedNotify = enable;
 }
-bool PresentityPresenceInformationListener::bypassEnabled() {
+bool PresentityPresenceInformationListener::bypassEnabled() const {
 	return mBypassEnabled;
 }
 void PresentityPresenceInformationListener::enableBypass(bool enable) {

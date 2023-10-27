@@ -33,15 +33,14 @@
 #include "bellesip-signaling-exception.hh"
 #include "flexisip/configmanager.hh"
 #include "observers/presence-info-observer.hh"
-#include "presence/presentity/map-presentity-manager.hh"
-#include "presence/presentity/presentity-manager.hh"
 #include "service-server.hh"
 #include "utils/thread/thread-pool.hh"
 
 namespace flexisip {
 
+// Used in main.cc, use forward declaration
+class PresentityManager;
 class Subscription;
-class PresentityPresenceInformation;
 
 class PresenceServer : public ServiceServer {
 public:
@@ -100,7 +99,7 @@ private:
 	std::unique_ptr<ThreadPool> mThreadPool{};
 	bool mEnabled;
 	size_t mMaxPresenceInfoNotifiedAtATime;
-	std::unique_ptr<PresentityManager> mPresentityManager{};
+	std::unique_ptr<PresentityManager> mPresentityManager;
 
 	static constexpr const char* sSubscriptionDataTag = "subscription";
 };

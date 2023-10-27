@@ -34,14 +34,10 @@ public:
 	/* Re-definition of BelleSipSourcePtr in order to use BelleSipSourceCancelingDeleter as deleter */
 	using BelleSipSourcePtr = std::unique_ptr<belle_sip_source_t, BelleSipSourceCancelingDeleter>;
 
-	PresenceInformationElement(Xsd::Pidf::Presence::TupleSequence* tuples,
-	                           Xsd::DataModel::Person* person,
-	                           belle_sip_main_loop_t* mainLoop);
+	PresenceInformationElement(Xsd::Pidf::Presence::TupleSequence* tuples, Xsd::DataModel::Person* person);
 	// create an information element with a default tuple set to open.
-	PresenceInformationElement(const belle_sip_uri_t* contact);
+	explicit PresenceInformationElement(const belle_sip_uri_t* contact);
 	~PresenceInformationElement();
-
-	time_t getExpitationTime() const;
 
 	template <typename T>
 	void setExpiresTimer(T&& timer) {
@@ -51,8 +47,6 @@ public:
 	const std::unique_ptr<Xsd::Pidf::Tuple>& getTuple(const std::string& id) const;
 	const std::list<std::unique_ptr<Xsd::Pidf::Tuple>>& getTuples() const;
 	const Xsd::DataModel::Person getPerson() const;
-	// void addTuple(pidf::Tuple*);
-	// void removeTuple(pidf::Tuple*);
 	void clearTuples();
 	const std::string& getEtag();
 	void setEtag(const std::string& eTag);
@@ -62,8 +56,6 @@ private:
 
 	std::list<std::unique_ptr<Xsd::Pidf::Tuple>> mTuples;
 	Xsd::DataModel::Person mPerson{""};
-	Xsd::XmlSchema::dom::unique_ptr<xercesc::DOMDocument> mDomDocument; // needed to store extension nodes
-	belle_sip_main_loop_t* mBelleSipMainloop = nullptr;
 	BelleSipSourcePtr mTimer;
 	std::string mEtag;
 };

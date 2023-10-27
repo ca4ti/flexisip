@@ -18,21 +18,28 @@
 
 #pragma once
 
-#include "presence-info-observer.hh"
-#include "presence/belle-sip-using.hh"
+#include <unordered_map>
+
+#include "auth/db/authdb.hh"
+#include "presence/presentity/presentity-presence-information.hh"
 
 namespace flexisip {
 
-// Used in main.cc, use forward declaration
-class PresentityPresenceInformation;
-
-class PresenceLongterm : public PresenceInfoObserver {
+class PresenceAuthDbListener : public AuthDbListener {
 public:
-	explicit PresenceLongterm(belle_sip_main_loop_t* mainLoop) : mMainLoop(mainLoop){};
-	void onListenerEvent(const std::shared_ptr<PresentityPresenceInformation>& info) const override;
-	void onListenerEvents(std::list<std::shared_ptr<PresentityPresenceInformation>>& info) const override;
+	PresenceAuthDbListener(belle_sip_main_loop_t* mainLoop, const std::shared_ptr<PresentityPresenceInformation>& info);
+	PresenceAuthDbListener(
+	    belle_sip_main_loop_t* mainLoop,
+	    const std::unordered_map<std::string, std::shared_ptr<PresentityPresenceInformation>>& dInfo);
+
+	void onResult(AuthDbResult result, const std::string& passwd) override;
+	void onResult(AuthDbResult result, const std::vector<passwd_algo_t>& passwd) override;
 
 private:
+	void processResponse(AuthDbResult result, const std::string& user);
+
 	belle_sip_main_loop_t* mMainLoop;
+	const std::shared_ptr<PresentityPresenceInformation> mInfo{};
+	std::unordered_map<std::string, std::shared_ptr<PresentityPresenceInformation>> mDInfo{};
 };
 } // namespace flexisip

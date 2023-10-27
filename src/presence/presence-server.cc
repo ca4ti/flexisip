@@ -30,6 +30,7 @@
 
 #include "bellesip-signaling-exception.hh"
 #include "observers/presence-longterm.hh"
+#include "presence/presentity/map-presentity-manager.hh"
 #include "presence/presentity/presentity-presence-information.hh"
 #include "presence/subscription/subscription.hh"
 #include "subscription/body-list-subscription.hh"
