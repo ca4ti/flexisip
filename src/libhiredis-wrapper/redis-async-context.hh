@@ -71,14 +71,14 @@ public:
 		friend class SubscriptionSession;
 
 		// SAFETY: Do not use with subscribe
-		int command(const ArgsPacker& args, CommandCallback&& callback);
+		int command(const ArgsPacker& args, CommandCallback&& callback) const;
 
 		bool connected() const {
 			return mConnected;
 		}
 
 	private:
-		int command(const ArgsPacker&, CommandCallback&&, redisCallbackFn*);
+		int command(const ArgsPacker&, CommandCallback&&, redisCallbackFn*) const;
 		explicit Ready(ContextPtr&&);
 		ContextPtr mCtx;
 		bool mConnected{false};
@@ -98,6 +98,7 @@ public:
 	Session();
 
 	State& getState();
+	const State& getState() const;
 	State& connect(su_root_t*, const std::string_view& address, int port);
 	State& disconnect();
 

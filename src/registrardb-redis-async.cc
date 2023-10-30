@@ -28,6 +28,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -42,6 +43,7 @@
 #include "compat/hiredis/hiredis.h"
 #include "libhiredis-wrapper/redis-args-packer.hh"
 #include "libhiredis-wrapper/redis-async-context.hh"
+#include "libhiredis-wrapper/redis-async-script.hh"
 #include "libhiredis-wrapper/redis-reply.hh"
 #include "recordserializer.hh"
 #include "redis-async-script.hh"
@@ -65,10 +67,10 @@ using Reply = reply::Reply;
 
 namespace {
 
-const auto FETCH_EXPIRING_CONTACTS_SCRIPT = redis::AsyncScript<uint64_t, float>(
+const Script FETCH_EXPIRING_CONTACTS_SCRIPT{
 #include "fetch-expiring-contacts.lua.hh"
     , // ❯ sed -n '/R"lua(/,/)lua"/p' fetch-expiring-contacts.lua.hh | sed 's/R"lua(//' | head -n-1 | sha1sum
-    "8f26674ebf2a65c4eee45d2ae9b98c121cf6ff43");
+    "8f26674ebf2a65c4eee45d2ae9b98c121cf6ff43"};
 
 } // namespace
 
@@ -142,28 +144,6 @@ void RegistrarDbRedisAsync::setWritable(bool value) {
 	mWritable = value;
 	notifyStateListener();
 }
-
-/* This method checks that a redis command was successful, and cleans up if not. You use it with the macro defined
- * below. */
-
-bool RegistrarDbRedisAsync::handleRedisStatus(const string& desc, int redisStatus, RedisRegisterContext* context) {
-	if (redisStatus != REDIS_OK) {
-		LOGE("Redis error for %s: %d", desc.c_str(), redisStatus);
-		if (context != nullptr) {
-			context->listener->onError();
-			delete context;
-		}
-		return FALSE;
-	}
-	return TRUE;
-}
-
-#define check_redis_command(cmd, context)                                                                              \
-	do {                                                                                                               \
-		if (handleRedisStatus(#cmd, (cmd), context) == FALSE) {                                                        \
-			return;                                                                                                    \
-		}                                                                                                              \
-	} while (0)
 
 namespace {
 
@@ -622,24 +602,6 @@ void RegistrarDbRedisAsync::sKeyExpirationPublishCallback(redisAsyncContext* c, 
 	}
 }
 
-void RegistrarDbRedisAsync::sHandleClear(redisAsyncContext*, redisReply* reply, RedisRegisterContext* context) {
-	context->self->handleClear(reply, context);
-}
-
-void RegistrarDbRedisAsync::sHandleFetch(redisAsyncContext*, redisReply* reply, RedisRegisterContext* context) {
-	context->self->handleFetch(reply, context);
-}
-
-void RegistrarDbRedisAsync::sHandleMigration(redisAsyncContext*, redisReply* reply, RedisRegisterContext* context) {
-	context->self->handleMigration(reply, context);
-}
-
-void RegistrarDbRedisAsync::sHandleRecordMigration(redisAsyncContext*,
-                                                   redisReply* reply,
-                                                   RedisRegisterContext* context) {
-	context->self->handleRecordMigration(reply, context);
-}
-
 void RegistrarDbRedisAsync::sHandleSubcommandReply(redisAsyncContext*, redisReply* reply, std::string* cmd) {
 	auto redisError = reply ? (reply->type == REDIS_REPLY_ERROR ? reply->str : nullptr) : "empty response";
 	if (redisError) {
@@ -785,7 +747,7 @@ void RegistrarDbRedisAsync::doBind(const MsgSip& msg,
 		auto& contacts = context->mRecord->getExtendedContacts();
 		auto& changeset = context->mChangeSet;
 		// Parse the fetched reply into the Record object (context->mRecord)
-		for (auto&& maybeExpired : parseContacts(*array)) {
+		for (auto&& maybeExpired : parseContacts(array->pairwise())) {
 			if (maybeExpired->isExpired()) {
 				changeset.mDelete.emplace_back(std::move(maybeExpired));
 			} else {
@@ -815,29 +777,30 @@ void RegistrarDbRedisAsync::doBind(const MsgSip& msg,
 	});
 }
 
-void RegistrarDbRedisAsync::handleClear(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& context) {
-	const char* key = context->mRecord->getKey().c_str();
-
-	if (!reply || reply->type == REDIS_REPLY_ERROR) {
-		LOGE("Redis error setting fs:%s [%lu] - %s", key, context->token, reply ? reply->str : "<null reply>");
-		if (reply && string(reply->str).find("READONLY") != string::npos) {
-			LOGW("Redis couldn't set the AOR because we're connected to a slave. Replying 480.");
-			context->succeeded = true;
-			if (context->listener) context->listener->onRecordFound(nullptr);
-		} else {
-			if (context->listener) context->listener->onError();
+void RegistrarDbRedisAsync::handleClear(Reply reply, const RedisRegisterContext& context) {
+	const auto recordName = "fs:" + context.mRecord->getKey() + " [" + std::to_string(context.token) + "]";
+	if (const auto* keysDeleted = std::get_if<reply::Integer>(&reply)) {
+		if (*keysDeleted == 1) {
+			SLOGD << "Record " << recordName << " successfully cleared";
+			if (context.listener) context.listener->onRecordFound(context.mRecord);
+			return;
 		}
-	} else {
-		LOGD("Clearing fs:%s [%lu] success", key, context->token);
-		context->succeeded = true;
-		if (context->listener) context->listener->onRecordFound(context->mRecord);
 	}
-	delete context;
+
+	if (const auto* error = std::get_if<reply::Error>(&reply)) {
+		if (error->find("READONLY") != string_view::npos) {
+			SLOGW << "Redis couldn't DEL " << recordName << " because we're connected to a slave. Replying 480.";
+			if (context.listener) context.listener->onRecordFound(nullptr);
+			return;
+		}
+	}
+
+	SLOGE << "Unexpected reply DELeting " << recordName << ": " << StreamableVariant(reply);
+	if (context.listener) context.listener->onError();
 }
 
-vector<unique_ptr<ExtendedContact>> RegistrarDbRedisAsync::parseContacts(const reply::Array& reply) {
-	decltype(parseContacts(reply)) contacts{};
-	const auto entries = reply.pairwise();
+vector<unique_ptr<ExtendedContact>> RegistrarDbRedisAsync::parseContacts(const reply::ArrayOfPairs& entries) {
+	decltype(parseContacts(entries)) contacts{};
 	contacts.reserve(entries.size());
 
 	for (const auto [maybeKey, maybeContactStr] : entries) {
@@ -856,43 +819,49 @@ vector<unique_ptr<ExtendedContact>> RegistrarDbRedisAsync::parseContacts(const r
 			LOGE("This contact could not be parsed.");
 		}
 	}
+
+	return contacts;
 }
 
 void RegistrarDbRedisAsync::doClear(const MsgSip& msg, const shared_ptr<ContactUpdateListener>& listener) {
+	Session::Ready* cmdSession;
+	if (!(cmdSession = tryGetCommandSession())) {
+		if (listener) listener->onError();
+		return;
+	}
+
 	auto sip = msg.getSip();
 	try {
 		// Delete the AOR Hashmap using DEL
 		// Once it is done, fetch all the contacts in the AOR and call the onRecordFound of the listener ?
-		RedisRegisterContext* context = new RedisRegisterContext(this, SipUri(sip->sip_from->a_url), listener);
+		auto context = std::make_unique<RedisRegisterContext>(this, SipUri(sip->sip_from->a_url), listener);
 
 		if (!isConnected() && !connect()) {
 			LOGE("Not connected to redis server");
 			if (context->listener) context->listener->onError();
-			delete context;
 			return;
 		}
 
-		const char* key = context->mRecord->getKey().c_str();
-		LOGD("Clearing fs:%s [%lu]", key, context->token);
+		const string& key = context->mRecord->getKey();
+		SLOGD << "Clearing fs:" << key << " [" << context->token << "]";
 		mLocalRegExpire->remove(key);
-		check_redis_command(mTimedCommand.send(mCommandSession,
-		                                       (void (*)(redisAsyncContext*, void*, void*))sHandleClear, context,
-		                                       "DEL fs:%s", key),
-		                    context);
+		cmdSession->command({"DEL", "fs:" + key}, [context = std::move(context), this](Session&, Reply reply) {
+			handleClear(reply, *context);
+		});
 	} catch (const sofiasip::InvalidUrlError& e) {
 		SLOGE << "Invalid 'From' SIP URI [" << e.getUrl() << "]: " << e.getReason();
-		context->succeeded = true;
 		listener->onInvalid();
 	}
 }
 
-void RegistrarDbRedisAsync::handleFetch(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& context) {
-	const char* key = context->mRecord->getKey().c_str();
-	const auto insertIfActive = [&record = context->mRecord](auto&& contact) {
+void RegistrarDbRedisAsync::handleFetch(redis::async::Reply reply, const RedisRegisterContext& context) {
+	const auto& record = context.mRecord;
+	const auto recordName = "fs:" + record->getKey() + " [" + std::to_string(context.token) + "]";
+	const auto insertIfActive = [&record = *record](auto&& contact) {
 		if (contact->isExpired()) return;
 
 		try {
-			record->insertOrUpdateBinding(std::move(contact), nullptr);
+			record.insertOrUpdateBinding(std::move(contact), nullptr);
 		} catch (const InvalidCSeq&) {
 			// There can be a race condition on contact registration. If we get more REGISTERs (without sip instance)
 			// before Redis responded to the first, then we issue multiple insertion commands resulting in duplicated
@@ -904,178 +873,104 @@ void RegistrarDbRedisAsync::handleFetch(redisReply* reply, std::unique_ptr<Redis
 		}
 	};
 
-	if (!reply || reply->type == REDIS_REPLY_ERROR) {
-		LOGE("Redis error: %s", reply ? reply->str : "<null reply>");
-		if (context->listener) context->listener->onError();
-		delete context;
-	} else if (reply->type == REDIS_REPLY_ARRAY) {
-		// This is the most common scenario: we want all contacts inside the record
-		LOGD("GOT fs:%s [%lu] --> %lu contacts", key, context->token, (reply->elements / 2));
-		if (reply->elements > 0) {
-			for (auto&& maybeExpired : parseContacts(reply)) {
-				insertIfActive(maybeExpired);
-			}
-			context->succeeded = true;
-			if (context->listener) context->listener->onRecordFound(context->mRecord);
-			delete context;
-		} else {
-			// We haven't found the record in redis, trying to find an old record
-			LOGD("Record fs:%s not found, trying aor:%s", key, key);
-			check_redis_command(mTimedCommand.send(mCommandSession,
-			                                       (void (*)(redisAsyncContext*, void*, void*))sHandleRecordMigration,
-			                                       context, "GET aor:%s", key),
-			                    context);
-		}
-	} else {
-		// This is only when we want a contact matching a given gruu
-		const char* gruu = context->mUniqueIdToFetch.c_str();
-		context->succeeded = true;
-		if (reply->len > 0) {
-			LOGD("GOT fs:%s [%lu] for gruu %s --> %s", key, context->token, gruu, reply->str);
-			insertIfActive(make_unique<ExtendedContact>(gruu, reply->str));
-			if (context->listener) context->listener->onRecordFound(context->mRecord);
-		} else {
-			LOGD("Contact matching gruu %s in record fs:%s not found", gruu, key);
-			if (context->listener) context->listener->onRecordFound(nullptr);
-		}
-		delete context;
-	}
+	auto* listener = context.listener.get();
+	Match(reply).against(
+	    [&recordName, &insertIfActive, listener, &record, &context](const reply::Array& array) {
+		    // This is the most common scenario: we want all contacts inside the record
+		    const auto contacts = array.pairwise();
+		    SLOGD << "GOT " << recordName << " --> " << contacts.size() << " contacts";
+		    if (0 < contacts.size()) {
+			    for (auto&& maybeExpired : parseContacts(contacts)) {
+				    insertIfActive(maybeExpired);
+			    }
+			    if (listener) listener->onRecordFound(record);
+		    } else {
+			    // Anchor WKADREGMIGDELREC
+			    // This is a workaround required in case of unregister (expire set to 0) because
+			    // if there is only one entry, it will be deleted first so the fetch will come back empty
+			    // and flexisip will answer 480 instead of 200.
+			    if (listener) listener->onRecordFound(context.mBindingParameters.globalExpire == 0 ? record : nullptr);
+		    }
+	    },
+	    [&context, &recordName, &insertIfActive, listener, &record](const reply::String& contact) {
+		    // This is only when we want a contact matching a given gruu
+		    const char* gruu = context.mUniqueIdToFetch.c_str();
+		    if (!contact.empty()) {
+			    SLOGD << "GOT " << recordName << " for gruu " << gruu << " --> " << contact;
+			    insertIfActive(make_unique<ExtendedContact>(gruu, contact.data()));
+			    if (listener) listener->onRecordFound(record);
+		    } else {
+			    SLOGD << "Contact matching gruu " << gruu << " in record " << recordName << " not found";
+			    if (listener) listener->onRecordFound(nullptr);
+		    }
+	    },
+	    [&recordName, listener](const auto& unexpected) {
+		    SLOGE << "Unexpected Redis reply fetching " << recordName << ": " << unexpected;
+		    if (listener) listener->onError();
+	    });
 }
 
 void RegistrarDbRedisAsync::doFetch(const SipUri& url, const shared_ptr<ContactUpdateListener>& listener) {
 	// fetch all the contacts in the AOR (HGETALL) and call the onRecordFound of the listener
-	RedisRegisterContext* context = new RedisRegisterContext(this, url, listener);
-
-	if (!isConnected() && !connect()) {
-		LOGE("Not connected to redis server");
-		if (context->listener) context->listener->onError();
-		delete context;
+	Session::Ready* cmdSession;
+	if (!(cmdSession = tryGetCommandSession())) {
+		if (listener) listener->onError();
 		return;
 	}
 
-	const char* key = context->mRecord->getKey().c_str();
-	LOGD("Fetching fs:%s [%lu]", key, context->token);
-	check_redis_command(mTimedCommand.send(mCommandSession, (void (*)(redisAsyncContext*, void*, void*))sHandleFetch,
-	                                       context, "HGETALL fs:%s", key),
-	                    context);
-}
+	auto context = std::make_unique<RedisRegisterContext>(this, url, listener);
 
-void RegistrarDbRedisAsync::fetchExpiringContacts(
-    time_t startTimestamp, float threshold, std::function<void(std::vector<ExtendedContact>&&)>&& callback) const {
-	FETCH_EXPIRING_CONTACTS_SCRIPT.with(startTimestamp, threshold)
-	    .then([callback = std::move(callback)](redisReply* reply) {
-		    auto count = reply->elements;
-		    auto expiringContacts = std::vector<ExtendedContact>();
-		    expiringContacts.reserve(count);
-		    for (size_t i = 0; i < count; i++) {
-			    expiringContacts.emplace_back("", reply->element[i]->str);
-		    }
-		    callback(std::move(expiringContacts));
-	    })
-	    .call(mCommandSession);
+	const auto& key = context->mRecord->getKey();
+	SLOGD << "Fetching fs:" << key << " [" << context->token << "]";
+	cmdSession->command({"HGETALL", "fs:" + key},
+	                    [context = std::move(context), this](Session&, Reply reply) { handleFetch(reply, *context); });
 }
 
 void RegistrarDbRedisAsync::doFetchInstance(const SipUri& url,
                                             const string& uniqueId,
                                             const shared_ptr<ContactUpdateListener>& listener) {
 	// fetch only the contact in the AOR (HGET) and call the onRecordFound of the listener
-	RedisRegisterContext* context = new RedisRegisterContext(this, url, listener);
+	Session::Ready* cmdSession;
+	if (!(cmdSession = tryGetCommandSession())) {
+		if (listener) listener->onError();
+		return;
+	}
+
+	auto context = std::make_unique<RedisRegisterContext>(this, url, listener);
 	context->mUniqueIdToFetch = uniqueId;
 
-	if (!isConnected() && !connect()) {
-		LOGE("Not connected to redis server");
-		if (context->listener) context->listener->onError();
-		delete context;
+	const auto& recordKey = context->mRecord->getKey();
+	SLOGD << "Fetching fs:" << recordKey << " [" << context->token << "] contact matching unique id " << recordKey;
+	cmdSession->command({"HGET", "fs:" + recordKey, uniqueId},
+	                    [context = std::move(context), this](Session&, Reply reply) { handleFetch(reply, *context); });
+}
+
+void RegistrarDbRedisAsync::fetchExpiringContacts(
+    time_t startTimestamp, float threshold, std::function<void(std::vector<ExtendedContact>&&)>&& callback) const {
+	const Session::Ready* cmdSession;
+	if (!(cmdSession = std::get_if<Session::Ready>(&mCommandSession.getState()))) {
+		SLOGW << "Redis session not ready to send commands. Cancelling fetchExpiringContacts operation";
 		return;
 	}
 
-	const char* key = context->mRecord->getKey().c_str();
-	const char* field = uniqueId.c_str();
-	LOGD("Fetching fs:%s [%lu] contact matching unique id %s", key, context->token, field);
-	check_redis_command(mTimedCommand.send(mCommandSession, (void (*)(redisAsyncContext*, void*, void*))sHandleFetch,
-	                                       context, "HGET fs:%s %s", key, field),
-	                    context);
-}
+	FETCH_EXPIRING_CONTACTS_SCRIPT.call(*cmdSession,
+	                                    {
+	                                        std::to_string(startTimestamp),
+	                                        std::to_string(threshold),
+	                                    },
+	                                    [callback = std::move(callback)](Session&, Reply reply) {
+		                                    if (const auto* array = std::get_if<reply::Array>(&reply)) {
+			                                    std::vector<ExtendedContact> expiringContacts{};
+			                                    expiringContacts.reserve(array->size());
+			                                    for (const auto contact : *array) {
+				                                    expiringContacts.emplace_back("", std::get<reply::String>(contact));
+			                                    }
+			                                    callback(std::move(expiringContacts));
+		                                    }
 
-/*
- * The following code is to migrate a redis database to the new way
- */
-
-void RegistrarDbRedisAsync::handleRecordMigration(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& context) {
-	if (!reply || reply->type == REDIS_REPLY_ERROR) {
-		LOGE("Redis error: %s", reply ? reply->str : "<null reply>");
-		context->succeeded = true;
-		if (context->listener) context->listener->onRecordFound(nullptr);
-	} else {
-		if (reply->len > 0) {
-			if (!mSerializer->parse(reply->str, reply->len, context->mRecord.get())) {
-				LOGE("Couldn't parse stored contacts for aor:%s : %u bytes", context->mRecord->getKey().c_str(),
-				     (unsigned int)reply->len);
-				context->succeeded = true;
-				if (context->listener) context->listener->onRecordFound(nullptr);
-			} else {
-				LOGD("Parsing stored contacts for aor:%s successful", context->mRecord->getKey().c_str());
-				serializeAndSendToRedis(context, sHandleMigration);
-				return;
-			}
-		} else {
-			context->succeeded = true;
-			// Anchor WKADREGMIGDELREC
-			// This is a workaround required in case of unregister (expire set to 0) because
-			// if there is only one entry, it will be deleted first so the fetch will come back empty
-			// and flexisip will answer 480 instead of 200.
-			if (context->listener)
-				context->listener->onRecordFound(context->mBindingParameters.globalExpire == 0 ? context->mRecord
-				                                                                               : nullptr);
-		}
-	}
-	delete context;
-}
-
-void RegistrarDbRedisAsync::handleMigration(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& context) {
-	if (!reply || reply->type == REDIS_REPLY_ERROR) {
-		LOGE("Redis error: %s", reply ? reply->str : "<null reply>");
-	} else if (reply->type == REDIS_REPLY_ARRAY) {
-		LOGD("Fetching all previous records success: %lu record(s) found", (unsigned long)reply->elements);
-
-		for (size_t i = 0; i < reply->elements; i++) {
-			redisReply* element = reply->element[i];
-			try {
-				SipUri url(element->str);
-				RedisRegisterContext* new_context = new RedisRegisterContext(this, std::move(url), nullptr);
-				LOGD("Fetching previous record: %s", element->str);
-				check_redis_command(
-				    mTimedCommand.send(mCommandSession,
-				                       (void (*)(redisAsyncContext*, void*, void*))sHandleRecordMigration, new_context,
-				                       "GET %s", element->str),
-				    new_context);
-			} catch (const sofiasip::InvalidUrlError& e) {
-				LOGD("Skipping invalid previous record [%s]: %s", element->str, e.getReason().c_str());
-			}
-		}
-	} else {
-		LOGD("Record aor:%s successfully migrated", context->mRecord->getKey().c_str());
-		context->succeeded = true;
-		if (context->listener) context->listener->onRecordFound(context->mRecord);
-		/*If we want someday to remove the previous record, uncomment the following and comment the delete context above
-		check_redis_command(mTimedCommand.send(mContext, (void (*)(redisAsyncContext*, void*, void*))sHandleClear,
-		    context, "DEL aor:%s", context->mRecord->getKey().c_str()), context);*/
-	}
-	delete context;
-}
-
-void RegistrarDbRedisAsync::doMigration() {
-	if (!isConnected() && !connect()) {
-		LOGE("Not connected to redis server");
-		return;
-	}
-
-	LOGD("Fetching previous record(s)");
-	RedisRegisterContext* context = new RedisRegisterContext(this, SipUri(), nullptr);
-	check_redis_command(mTimedCommand.send(mCommandSession,
-	                                       (void (*)(redisAsyncContext*, void*, void*))sHandleMigration, context,
-	                                       "KEYS aor:*"),
-	                    context);
+		                                    SLOGE << "Fetch expiring contacts script returned unexpected reply: "
+		                                          << StreamableVariant(reply);
+	                                    });
 }
 
 RedisRegisterContext::~RedisRegisterContext() {

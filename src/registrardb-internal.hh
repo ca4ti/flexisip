@@ -39,7 +39,6 @@ private:
 	void doFetchInstance(const SipUri& url,
 	                     const std::string& uniqueId,
 	                     const std::shared_ptr<ContactUpdateListener>& listener) override;
-	void doMigration() override;
 	void publish(const std::string& topic, const std::string& uid) override;
 
 	std::unordered_map<std::string, std::shared_ptr<Record>> mRecords{};

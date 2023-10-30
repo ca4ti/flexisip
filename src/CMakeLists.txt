@@ -76,6 +76,7 @@ add_library(flexisip SHARED
 	lib/nlohmann-json-3-11-2/json.hpp
 	libhiredis-wrapper/redis-async-context.cc libhiredis-wrapper/redis-async-context.hh
 	libhiredis-wrapper/redis-reply.cc libhiredis-wrapper/redis-reply.hh
+	libhiredis-wrapper/redis-async-script.cc libhiredis-wrapper/redis-async-script.hh
 	log/logmanager.cc
 	lpconfig.cc
 	mediarelay.cc mediarelay.hh

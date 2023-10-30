@@ -115,7 +115,7 @@ Session::Disconnecting::Disconnecting(Ready&& prev) : mCtx(std::move(prev.mCtx))
 	redisAsyncDisconnect(mCtx.get());
 }
 
-int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback) {
+int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback) const {
 	return command(args, std::move(callback),
 	               [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
 		               std::unique_ptr<CommandCallback> commandContext{static_cast<CommandCallback*>(rawCommandData)};
@@ -144,7 +144,7 @@ int SubscriptionSession::Ready::subscribe(const ArgsPacker& args, CommandCallbac
 	                        });
 }
 
-int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback, redisCallbackFn* fn) {
+int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback, redisCallbackFn* fn) const {
 	return redisAsyncCommandArgv(
 	    mCtx.get(), fn, std::make_unique<CommandCallback>(std::move(callback)).release(), args.getArgCount(),
 	    // This const char** signature supposedly suggests that while the array itself is const, its elements are not.
@@ -153,6 +153,9 @@ int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback, 
 }
 
 Session::State& Session::getState() {
+	return mState;
+}
+const Session::State& Session::getState() const {
 	return mState;
 }
 

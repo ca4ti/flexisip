@@ -167,7 +167,6 @@ protected:
 	void doFetchInstance(const SipUri& url,
 	                     const std::string& uniqueId,
 	                     const std::shared_ptr<ContactUpdateListener>& listener) override;
-	void doMigration() override;
 	bool subscribe(const std::string& topic, std::weak_ptr<ContactRegisteredListener>&& listener) override;
 	void unsubscribe(const std::string& topic, const std::shared_ptr<ContactRegisteredListener>& listener) override;
 	void publish(const std::string& topic, const std::string& uid) override;
@@ -185,17 +184,16 @@ private:
 	redis::async::Session::Ready* tryGetCommandSession();
 
 	void serializeAndSendToRedis(RedisRegisterContext&, redis::async::Session::CommandCallback&&);
-	bool handleRedisStatus(const std::string& desc, int redisStatus, std::unique_ptr<RedisRegisterContext>&& data);
 	void subscribeTopic(const std::string& topic);
 	void subscribeAll();
 	void subscribeToKeyExpiration();
-	static std::vector<std::unique_ptr<ExtendedContact>> parseContacts(const redis::reply::Array&);
+	static std::vector<std::unique_ptr<ExtendedContact>> parseContacts(const redis::reply::ArrayOfPairs&);
 
 	/* callbacks */
 	void handleAuthReply(const redisReply* reply);
-	void handleBind(redis::async::Reply reply, std::unique_ptr<RedisRegisterContext>&& data);
-	void handleClear(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& data);
-	void handleFetch(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& data);
+	void handleBind(redis::async::Reply, std::unique_ptr<RedisRegisterContext>&&);
+	void handleClear(redis::async::Reply, const RedisRegisterContext&);
+	void handleFetch(redis::async::Reply, const RedisRegisterContext&);
 
 	/**
 	 * This callback is called when the Redis instance answered our "INFO replication" message.
@@ -204,8 +202,6 @@ private:
 	 * @param str Redis answer
 	 */
 	void handleReplicationInfoReply(const redis::reply::String& str);
-	void handleMigration(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& data);
-	void handleRecordMigration(redisReply* reply, std::unique_ptr<RedisRegisterContext>&& data);
 	void onSubscribeConnect(const redisAsyncContext* c, int status);
 	void onSubscribeDisconnect(const redisAsyncContext* c, int status);
 
@@ -217,10 +213,6 @@ private:
 	/* static handlers */
 	// static void sHandleAorGetReply(struct redisAsyncContext *, void *r, void *privdata);
 	static void sHandleAuthReply(redisAsyncContext* ac, void* r, void* privdata);
-	static void sHandleClear(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
-	static void sHandleFetch(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
-	static void sHandleMigration(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
-	static void sHandleRecordMigration(redisAsyncContext* ac, redisReply* reply, RedisRegisterContext* data);
 	static void sHandleSubcommandReply(redisAsyncContext*, redisReply* reply, std::string* cmd);
 
 	/**
