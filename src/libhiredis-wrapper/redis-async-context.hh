@@ -21,6 +21,7 @@
 
 #include "redis-args-packer.hh"
 #include "redis-reply.hh"
+#include "utils/stl-backports.hh"
 
 namespace flexisip::redis::async {
 
@@ -58,7 +59,7 @@ public:
 	};
 	using ContextPtr = std::unique_ptr<redisAsyncContext, ContextDeleter>;
 
-	using CommandCallback = std::function<void(Session&, Reply)>;
+	using CommandCallback = stl_backports::move_only_function<void(Session&, Reply)>;
 
 	class Disconnected {
 		friend std::ostream& operator<<(std::ostream&, const Disconnected&);

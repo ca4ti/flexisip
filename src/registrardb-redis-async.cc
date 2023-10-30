@@ -46,7 +46,6 @@
 #include "libhiredis-wrapper/redis-async-script.hh"
 #include "libhiredis-wrapper/redis-reply.hh"
 #include "recordserializer.hh"
-#include "redis-async-script.hh"
 #include "registrar/exceptions.hh"
 #include "registrar/extended-contact.hh"
 #include "registrardb-redis-sofia-event.h"
@@ -740,7 +739,7 @@ void RegistrarDbRedisAsync::doBind(const MsgSip& msg,
 		LOGD("Got current Record content for key [fs:%s].", context->mRecord->getKey().c_str());
 		reply::Array* array = nullptr;
 		if (!(array = std::get_if<reply::Array>(&reply))) {
-			SLOGE << "Unexpected reply on Redis pre-bind fetch: " << reply;
+			SLOGE << "Unexpected reply on Redis pre-bind fetch: " << StreamableVariant(reply);
 			return;
 		}
 
@@ -804,7 +803,7 @@ vector<unique_ptr<ExtendedContact>> RegistrarDbRedisAsync::parseContacts(const r
 	contacts.reserve(entries.size());
 
 	for (const auto [maybeKey, maybeContactStr] : entries) {
-		SLOGD << "Parsing contact " << maybeKey << " => " << maybeContactStr;
+		SLOGD << "Parsing contact " << StreamableVariant(maybeKey) << " => " << StreamableVariant(maybeContactStr);
 		const reply::String *key, *contactStr = nullptr;
 		if (!(key = std::get_if<reply::String>(&maybeKey)) ||
 		    !(contactStr = std::get_if<reply::String>(&maybeContactStr))) {
@@ -953,24 +952,24 @@ void RegistrarDbRedisAsync::fetchExpiringContacts(
 		return;
 	}
 
-	FETCH_EXPIRING_CONTACTS_SCRIPT.call(*cmdSession,
-	                                    {
-	                                        std::to_string(startTimestamp),
-	                                        std::to_string(threshold),
-	                                    },
-	                                    [callback = std::move(callback)](Session&, Reply reply) {
-		                                    if (const auto* array = std::get_if<reply::Array>(&reply)) {
-			                                    std::vector<ExtendedContact> expiringContacts{};
-			                                    expiringContacts.reserve(array->size());
-			                                    for (const auto contact : *array) {
-				                                    expiringContacts.emplace_back("", std::get<reply::String>(contact));
-			                                    }
-			                                    callback(std::move(expiringContacts));
-		                                    }
+	FETCH_EXPIRING_CONTACTS_SCRIPT.call(
+	    *cmdSession,
+	    {
+	        std::to_string(startTimestamp),
+	        std::to_string(threshold),
+	    },
+	    [callback = std::move(callback)](Session&, Reply reply) {
+		    if (const auto* array = std::get_if<reply::Array>(&reply)) {
+			    std::vector<ExtendedContact> expiringContacts{};
+			    expiringContacts.reserve(array->size());
+			    for (const auto contact : *array) {
+				    expiringContacts.emplace_back("", std::get<reply::String>(contact).data());
+			    }
+			    callback(std::move(expiringContacts));
+		    }
 
-		                                    SLOGE << "Fetch expiring contacts script returned unexpected reply: "
-		                                          << StreamableVariant(reply);
-	                                    });
+		    SLOGE << "Fetch expiring contacts script returned unexpected reply: " << StreamableVariant(reply);
+	    });
 }
 
 RedisRegisterContext::~RedisRegisterContext() {

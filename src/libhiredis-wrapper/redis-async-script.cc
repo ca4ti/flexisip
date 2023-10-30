@@ -23,13 +23,13 @@ void Script::call(const Session::Ready& session,
 	}
 
 	session.command(args, [callScript = std::move(args), callback = std::move(callback), this](Session& session,
-	                                                                                           Reply reply) {
+	                                                                                           Reply reply) mutable {
 		bool loaded = true;
 		if (const auto* err = std::get_if<reply::Error>(&reply)) {
 			if (*err == "NOSCRIPT No matching script. Please use EVAL.") loaded = false;
 		}
 		if (loaded) {
-			callback(session, reply);
+			callback(session, std::move(reply));
 			return;
 		}
 
@@ -42,9 +42,9 @@ void Script::call(const Session::Ready& session,
 
 		cmdSession->command({"SCRIPT", "LOAD", mSource}, [callScript = std::move(callScript),
 		                                                  callback = std::move(callback),
-		                                                  sha1 = mSHA1](Session& session, Reply reply) {
+		                                                  sha1 = mSHA1](Session& session, Reply reply) mutable {
 			Match(reply).against(
-			    [sha1, &session, &callScript, callback = std::move(callback)](const reply::String& loadedSHA1) mutable {
+			    [sha1, &session, &callScript, &callback](const reply::String& loadedSHA1) {
 				    if (loadedSHA1 != sha1) {
 					    SLOGE << "Redis script SHA checksum mismatch. Expected " << sha1 << " got " << loadedSHA1
 					          << "If you have changed the Lua source code, you should update the SHA.";
