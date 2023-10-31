@@ -2,7 +2,7 @@
  *  SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-#include "libhiredis-wrapper/redis-async-context.hh"
+#include "libhiredis-wrapper/redis-async-session.hh"
 
 #include <cstddef>
 #include <cstdint>

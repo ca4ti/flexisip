@@ -32,7 +32,7 @@
 
 #include "agent.hh"
 #include "eventlogs/writers/event-log-writer.hh"
-#include "libhiredis-wrapper/redis-async-context.hh"
+#include "libhiredis-wrapper/redis-async-session.hh"
 #include "libhiredis-wrapper/redis-reply.hh"
 #include "recordserializer.hh"
 #include "registrar/binding-parameters.hh"

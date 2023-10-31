@@ -42,7 +42,7 @@
 
 #include "compat/hiredis/hiredis.h"
 #include "libhiredis-wrapper/redis-args-packer.hh"
-#include "libhiredis-wrapper/redis-async-context.hh"
+#include "libhiredis-wrapper/redis-async-session.hh"
 #include "libhiredis-wrapper/redis-async-script.hh"
 #include "libhiredis-wrapper/redis-reply.hh"
 #include "recordserializer.hh"

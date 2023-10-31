@@ -6,7 +6,7 @@
 
 #include <initializer_list>
 
-#include "redis-async-context.hh"
+#include "redis-async-session.hh"
 
 namespace flexisip::redis::async {
 
