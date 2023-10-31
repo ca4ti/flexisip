@@ -26,10 +26,17 @@ namespace flexisip {
 
 std::shared_ptr<PresenceInformationElementMap>
 PresenceInformationElementMap::make(belle_sip_main_loop_t* belleSipMainloop,
-                                    const std::weak_ptr<ElementMapListener>& initialListener) {
+                                    const std::weak_ptr<PresentityPresenceInformation>& initialParent) {
 	return std::shared_ptr<PresenceInformationElementMap>(
-	    new PresenceInformationElementMap(belleSipMainloop, initialListener));
+	    new PresenceInformationElementMap(belleSipMainloop, initialParent));
 }
+
+PresenceInformationElementMap::PresenceInformationElementMap(
+    belle_sip_main_loop_t* belleSipMainloop, const weak_ptr<PresentityPresenceInformation>& initialParent)
+    : mBelleSipMainloop(belleSipMainloop) {
+	mParents.push_back(initialParent);
+	mListeners.push_back(initialParent);
+};
 
 void PresenceInformationElementMap::removeByEtag(const std::string& eTag, bool notifyOther) {
 	auto it = mInformationElements.find(eTag);
@@ -66,10 +73,11 @@ std::optional<PresenceInformationElement*> PresenceInformationElementMap::getByE
 }
 
 void PresenceInformationElementMap::mergeInto(const std::shared_ptr<PresenceInformationElementMap>& otherMap,
-                                              const std::weak_ptr<ElementMapListener>& listener,
                                               bool notifyOther) {
 	otherMap->mInformationElements.merge(mInformationElements);
-	otherMap->mListeners.push_back(listener);
+	otherMap->mListeners.insert(end(otherMap->mListeners), begin(mListeners), end(mListeners));
+	otherMap->mParents.insert(end(otherMap->mParents), begin(mParents), end(mParents));
+
 	if (notifyOther) {
 		otherMap->notifyListeners();
 	}
@@ -86,30 +94,37 @@ void PresenceInformationElementMap::notifyListeners() {
 	}
 }
 
-void PresenceInformationElementMap::addParentListener(
-    const shared_ptr<PresentityPresenceInformationListener>& listener) {
-	mParentsListeners.emplace_back(listener);
-}
-
-std::shared_ptr<PresentityPresenceInformationListener> PresenceInformationElementMap::findParentListener(
-    std::function<bool(const std::shared_ptr<PresentityPresenceInformationListener>&)> predicate) const {
-	for (auto it = mParentsListeners.begin(); it != mParentsListeners.end();) {
-		auto subscriber = it->lock();
-		if (subscriber == nullptr) {
-			it = mParentsListeners.erase(it);
+shared_ptr<PresentityPresenceInformationListener>
+PresenceInformationElementMap::findPresenceInfoListener(const shared_ptr<PresentityPresenceInformation>& info) {
+	for (auto it = mParents.begin(); it != mParents.end();) {
+		auto parent = it->lock();
+		if (!parent) {
+			it = mParents.erase(it);
 			continue;
 		}
-		if (predicate(subscriber)) return subscriber;
+		const auto& listener = parent->findPresenceInfoListener(info, true);
+		if (listener) {
+			return listener;
+		}
 		it++;
 	}
+
 	return nullptr;
 }
 
-shared_ptr<PresentityPresenceInformationListener>
-PresenceInformationElementMap::findPresenceInfoListener(const shared_ptr<PresentityPresenceInformation>& info) {
-	return findParentListener([&info](const shared_ptr<PresentityPresenceInformationListener>& l) {
-		return belle_sip_uri_equals(l->getTo(), info->getEntity());
-	});
+size_t PresenceInformationElementMap::getNumberOfListeners() {
+	size_t numberOfListeners = 0;
+	for (auto it = mParents.begin(); it != mParents.end();) {
+		auto parent = it->lock();
+		if (parent == nullptr) {
+			it = mParents.erase(it);
+			continue;
+		}
+		numberOfListeners += parent->getNumberOfListeners();
+		it++;
+	}
+
+	return numberOfListeners;
 }
 
 } /* namespace flexisip */

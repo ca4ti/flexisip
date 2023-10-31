@@ -74,6 +74,7 @@ PresentityPresenceInformation::~PresentityPresenceInformation() {
 	belle_sip_object_unref((void*)mBelleSipMainloop);
 	SLOGD << "Presence information [" << this << "] deleted";
 }
+
 size_t PresentityPresenceInformation::getNumberOfListeners() const {
 	forEachSubscriber(
 	    [](const shared_ptr<
@@ -81,19 +82,26 @@ size_t PresentityPresenceInformation::getNumberOfListeners() const {
 
 	return mSubscribers.size();
 }
+
 std::list<std::shared_ptr<PresentityPresenceInformationListener>> PresentityPresenceInformation::getListeners() const {
 	list<shared_ptr<PresentityPresenceInformationListener>> retListeners;
 	forEachSubscriber(
 	    [&retListeners](const shared_ptr<PresentityPresenceInformationListener>& l) { retListeners.emplace_back(l); });
 	return retListeners;
 }
-size_t PresentityPresenceInformation::getNumberOfInformationElements() const {
-	return mInformationElements->getSize();
-}
+
 shared_ptr<PresentityPresenceInformationListener>
-PresentityPresenceInformation::findPresenceInfoListener(const shared_ptr<PresentityPresenceInformation>& info) const {
-	return mInformationElements->findPresenceInfoListener(info);
+PresentityPresenceInformation::findPresenceInfoListener(const shared_ptr<PresentityPresenceInformation>& info,
+                                                        bool calledFromMap) const {
+	if (!calledFromMap) {
+		return mInformationElements->findPresenceInfoListener(info);
+	}
+
+	return findSubscriber([&info](const shared_ptr<PresentityPresenceInformationListener>& l) {
+		return belle_sip_uri_equals(l->getTo(), info->getEntity());
+	});
 }
+
 string PresentityPresenceInformation::putTuples(Xsd::Pidf::Presence::TupleSequence& tuples,
                                                 Xsd::DataModel::Person& person,
                                                 int expires) {
@@ -237,7 +245,6 @@ void PresentityPresenceInformation::addListenerIfNecessary(
 	} else {
 		// not found, adding
 		mSubscribers.emplace_back(listener);
-		mInformationElements->addParentListener(listener);
 		op = "Adding";
 	}
 	SLOGD << op << " listener [" << listener.get() << "] on [" << *this << "]";
@@ -482,10 +489,8 @@ void PresentityPresenceInformation::forEachSubscriber(
 }
 
 void PresentityPresenceInformation::linkTo(const std::shared_ptr<PresentityPresenceInformation>& other) {
-	mInformationElements->mergeInto(other->mInformationElements, weak_from_this(), false);
+	mInformationElements->mergeInto(other->mInformationElements, false);
 	mInformationElements = other->mInformationElements;
-
-	forEachSubscriber([this](const auto& listener) { mInformationElements->addParentListener(listener); });
 
 	forEachSubscriber([this](const auto& listener) {
 		mPresentityManager.enableExtendedNotifyIfPossible(listener, shared_from_this());
@@ -495,6 +500,10 @@ void PresentityPresenceInformation::linkTo(const std::shared_ptr<PresentityPrese
 	});
 
 	mInformationElements->notifyListeners();
+}
+
+bool PresentityPresenceInformation::canBeSafelyDeleted() {
+	return mInformationElements->isEmpty() && mInformationElements->getNumberOfListeners() == 0;
 }
 
 } /* namespace flexisip */

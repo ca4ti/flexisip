@@ -52,8 +52,8 @@ shared_ptr<PresentityPresenceInformation> MapPresentityManager::getPresenceInfo(
 void MapPresentityManager::invalidateETag(const string& eTag) {
 	auto presenceInformationsByEtagIt = mPresenceInformationsByEtag.find(eTag);
 	if (presenceInformationsByEtagIt != mPresenceInformationsByEtag.end()) {
-		const shared_ptr<PresentityPresenceInformation> presenceInfo = presenceInformationsByEtagIt->second;
-		if (presenceInfo->getNumberOfListeners() == 0 && presenceInfo->getNumberOfInformationElements() == 0) {
+		if (const shared_ptr<PresentityPresenceInformation> presenceInfo = presenceInformationsByEtagIt->second;
+		    presenceInfo->canBeSafelyDeleted()) {
 			SLOGD << "Presentity [" << *presenceInfo
 			      << "] no longuer referenced by any SUBSCRIBE nor PUBLISH, removing";
 			mPresenceInformations.erase(presenceInfo->getEntity());
@@ -72,8 +72,9 @@ void MapPresentityManager::modifyEtag(const string& oldEtag, const string& newEt
 
 void MapPresentityManager::addEtag(const shared_ptr<PresentityPresenceInformation>& info, const string& etag) {
 	auto presenceInformationsByEtagIt = mPresenceInformationsByEtag.find(etag);
-	if (presenceInformationsByEtagIt != mPresenceInformationsByEtag.end())
+	if (presenceInformationsByEtagIt != mPresenceInformationsByEtag.end()) {
 		throw FLEXISIP_EXCEPTION << "Already existing etag [" << etag << "] use PresenceServer::modifyEtag instead ";
+	}
 	mPresenceInformationsByEtag[etag] = info;
 	SLOGD << "Etag manager size [" << mPresenceInformationsByEtag.size() << "]";
 }
@@ -91,7 +92,7 @@ void MapPresentityManager::addOrUpdateListener(shared_ptr<PresentityPresenceInfo
 	}
 
 	// notify observers that a listener is added or updated
-	for (auto& observer : mPresenceInfoObservers) {
+	for (const auto& observer : mPresenceInfoObservers) {
 		observer->onListenerEvent(presenceInfo);
 	}
 
@@ -164,7 +165,7 @@ void MapPresentityManager::removeListener(const shared_ptr<PresentityPresenceInf
 	const shared_ptr<PresentityPresenceInformation> presenceInfo = getPresenceInfo(listener->getPresentityUri());
 	if (presenceInfo) {
 		presenceInfo->removeListener(listener);
-		if (presenceInfo->getNumberOfListeners() == 0 && presenceInfo->getNumberOfInformationElements() == 0) {
+		if (presenceInfo->canBeSafelyDeleted()) {
 			SLOGD << "Presentity [" << *presenceInfo << "] no longer referenced by any SUBSCRIBE nor PUBLISH, removing";
 			mPresenceInformations.erase(presenceInfo->getEntity());
 		}

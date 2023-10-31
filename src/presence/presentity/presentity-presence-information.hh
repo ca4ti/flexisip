@@ -133,11 +133,6 @@ public:
 	size_t getNumberOfListeners() const;
 
 	/*
-	 * return current number of information elements (I.E from PUBLISH)
-	 */
-	size_t getNumberOfInformationElements() const;
-
-	/*
 	 * return all the listeners (I.E. subscribers) of this presence information
 	 */
 	std::list<std::shared_ptr<PresentityPresenceInformationListener>> getListeners() const;
@@ -146,13 +141,19 @@ public:
 	 * return if one of the subscribers subscribed for a presence information
 	 */
 	std::shared_ptr<PresentityPresenceInformationListener>
-	findPresenceInfoListener(const std::shared_ptr<PresentityPresenceInformation>& info) const;
+	findPresenceInfoListener(const std::shared_ptr<PresentityPresenceInformation>& info,
+	                         bool calledFromMap = false) const;
 
 	void onMapUpdate() override {
 		notifyAll();
 	}
 
 	void linkTo(const std::shared_ptr<PresentityPresenceInformation>& other);
+
+	/*
+	 * Return true if no tuple are present in ElementMap, and no more listener are present across all map's parent.
+	 */
+	bool canBeSafelyDeleted();
 
 private:
 	PresentityPresenceInformation(const belle_sip_uri_t* entity,
