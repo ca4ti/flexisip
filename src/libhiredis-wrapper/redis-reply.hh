@@ -19,6 +19,10 @@ class Error : public std::string_view {
 public:
 	friend std::ostream& operator<<(std::ostream&, const Error&);
 };
+class Status : public std::string_view {
+public:
+	friend std::ostream& operator<<(std::ostream&, const Error&);
+};
 using Integer = decltype(redisReply::integer);
 class Disconnected {
 public:
@@ -26,7 +30,7 @@ public:
 };
 class Array;
 
-using Reply = std::variant<String, Array, Integer, Error, Disconnected>;
+using Reply = std::variant<String, Array, Integer, Error, Disconnected, Status>;
 
 Reply tryFrom(const redisReply*);
 
@@ -73,13 +77,14 @@ public:
 
 	friend std::ostream& operator<<(std::ostream&, const Array&);
 
-protected:
+private:
 	const redisReply* const* mElements;
 	const std::size_t mCount;
 };
 
-class ArrayOfPairs : Array {
+class ArrayOfPairs {
 public:
+	using Element = Array::Element;
 	class Iterator {
 	public:
 		Iterator(const redisReply* const* ptr) : ptr(ptr) {
@@ -97,20 +102,24 @@ public:
 		const redisReply* const* ptr;
 	};
 
-	explicit ArrayOfPairs(const Array&);
+	ArrayOfPairs(const redisReply* const* elements, std::size_t count);
 
 	Iterator begin() const {
 		return mElements;
 	}
 	Iterator end() const {
-		return mElements + mCount - 1;
+		return mElements + mCount * 2;
 	}
 
 	std::size_t size() const {
-		return mCount / 2;
+		return mCount;
 	}
 
 	std::pair<Element, Element> operator[](std::size_t) const;
+
+private:
+	const redisReply* const* mElements;
+	const std::size_t mCount;
 };
 
 } // namespace flexisip::redis::reply

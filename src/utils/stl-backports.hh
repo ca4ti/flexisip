@@ -60,7 +60,7 @@ public:
 	}
 
 	operator bool() {
-		return mPtr;
+		return mPtr.operator bool();
 	}
 
 private:

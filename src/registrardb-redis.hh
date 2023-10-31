@@ -117,7 +117,6 @@ struct RedisRegisterContext {
 	su_timer_t* mRetryTimer = nullptr;
 	int mRetryCount = 0;
 	bool mUpdateExpire = false;
-	bool succeeded = false;
 	MsgSip mMsg;
 	BindingParameters mBindingParameters;
 	std::string mUniqueIdToFetch;
@@ -136,7 +135,6 @@ struct RedisRegisterContext {
 		// Note that MsgSip copy constructor is not invoked in order to avoid a deep copy.
 		// Instead, mMsg just takes a ref on the underlying sofia-sip msg_t.
 	}
-	~RedisRegisterContext();
 };
 
 class RegistrarDbRedisAsync : public RegistrarDb {

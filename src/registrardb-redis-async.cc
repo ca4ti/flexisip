@@ -628,7 +628,10 @@ void RegistrarDbRedisAsync::serializeAndSendToRedis(RedisRegisterContext& contex
 	Session::Ready* cmdSession = nullptr;
 	{
 		auto& state = mCommandSession.getState();
-		if ((cmdSession = std::get_if<Session::Ready>(&state)) == nullptr) return;
+		if ((cmdSession = std::get_if<Session::Ready>(&state)) == nullptr) {
+			if (context.listener) context.listener->onError();
+			return;
+		}
 	}
 
 	int setCount = 0;
@@ -688,7 +691,6 @@ void RegistrarDbRedisAsync::handleBind(Reply reply, std::unique_ptr<RedisRegiste
 	Match(reply).against(
 	    [&context](const reply::Array&) {
 		    context->mRetryCount = 0;
-		    context->succeeded = true;
 		    if (context->listener) context->listener->onRecordFound(context->mRecord);
 	    },
 	    [&context, &agent = mAgent](const auto& reply) {
@@ -701,6 +703,7 @@ void RegistrarDbRedisAsync::handleBind(Reply reply, std::unique_ptr<RedisRegiste
 			    context->mRetryTimer = agent->createTimer(redisRetryTimeoutMs, sBindRetry, context.release(), false);
 		    } else {
 			    log << "Unrecoverable. No further attempt will be made.";
+			    if (context->listener) context->listener->onError();
 		    }
 		    SLOGE << log.str();
 	    });
@@ -734,12 +737,13 @@ void RegistrarDbRedisAsync::doBind(const MsgSip& msg,
 	auto context = std::make_unique<RedisRegisterContext>(this, msg, parameters, listener);
 	mLocalRegExpire->update(context->mRecord);
 
-	cmdSession->command({"HGETALL", "fs:" + context->mRecord->getKey()}, [context = std::move(context),
-	                                                                      this](Session&, Reply reply) mutable {
+	const auto& key = context->mRecord->getKey();
+	cmdSession->command({"HGETALL", "fs:" + key}, [context = std::move(context), this](Session&, Reply reply) mutable {
 		LOGD("Got current Record content for key [fs:%s].", context->mRecord->getKey().c_str());
-		reply::Array* array = nullptr;
-		if (!(array = std::get_if<reply::Array>(&reply))) {
+		auto* array = std::get_if<reply::Array>(&reply);
+		if (array == nullptr) {
 			SLOGE << "Unexpected reply on Redis pre-bind fetch: " << StreamableVariant(reply);
+			if (context->listener) context->listener->onError();
 			return;
 		}
 
@@ -761,7 +765,6 @@ void RegistrarDbRedisAsync::doBind(const MsgSip& msg,
 			changeset +=
 			    context->mRecord->update(context->mMsg.getSip(), context->mBindingParameters, context->listener);
 		} catch (const InvalidCSeq&) {
-			context->succeeded = true;
 			if (context->listener) context->listener->onInvalid();
 			return;
 		}
@@ -770,7 +773,8 @@ void RegistrarDbRedisAsync::doBind(const MsgSip& msg,
 
 		/* now submit the changes triggered by the update operation to REDIS */
 		SLOGD << "Sending updated content to REDIS for key [fs:" << context->mRecord->getKey() << "]: " << changeset;
-		serializeAndSendToRedis(*context, [this, context = std::move(context)](Session&, Reply reply) mutable {
+		auto& ctxRef = *context;
+		serializeAndSendToRedis(ctxRef, [this, context = std::move(context)](Session&, Reply reply) mutable {
 			handleBind(reply, std::move(context));
 		});
 	});
@@ -834,12 +838,6 @@ void RegistrarDbRedisAsync::doClear(const MsgSip& msg, const shared_ptr<ContactU
 		// Delete the AOR Hashmap using DEL
 		// Once it is done, fetch all the contacts in the AOR and call the onRecordFound of the listener ?
 		auto context = std::make_unique<RedisRegisterContext>(this, SipUri(sip->sip_from->a_url), listener);
-
-		if (!isConnected() && !connect()) {
-			LOGE("Not connected to redis server");
-			if (context->listener) context->listener->onError();
-			return;
-		}
 
 		const string& key = context->mRecord->getKey();
 		SLOGD << "Clearing fs:" << key << " [" << context->token << "]";
@@ -970,10 +968,6 @@ void RegistrarDbRedisAsync::fetchExpiringContacts(
 
 		    SLOGE << "Fetch expiring contacts script returned unexpected reply: " << StreamableVariant(reply);
 	    });
-}
-
-RedisRegisterContext::~RedisRegisterContext() {
-	if (!succeeded && listener) listener->onError();
 }
 
 } // namespace flexisip

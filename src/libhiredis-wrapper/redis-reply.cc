@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "compat/hiredis/async.h"
+#include "read.h"
 #include "utils/variant-utils.hh"
 
 namespace flexisip::redis::reply {
@@ -40,6 +41,9 @@ Reply tryFrom(const redisReply* reply) {
 	switch (reply->type) {
 		case REDIS_REPLY_ERROR: {
 			return Error{{reply->str, reply->len}};
+		} break;
+		case REDIS_REPLY_STATUS: {
+			return Status{{reply->str, reply->len}};
 		} break;
 		case REDIS_REPLY_STRING: {
 			return String{{reply->str, reply->len}};
@@ -70,6 +74,9 @@ Array::Element Array::Iterator::operator*() {
 std::ostream& operator<<(std::ostream& stream, const Error& error) {
 	return stream << "redis::Error('" << static_cast<const std::string_view&>(error) << "')";
 }
+std::ostream& operator<<(std::ostream& stream, const Status& status) {
+	return stream << "redis::Status('" << static_cast<const std::string_view&>(status) << "')";
+}
 std::ostream& operator<<(std::ostream& stream, const String& str) {
 	return stream << '"' << static_cast<const std::string_view&>(str) << '"';
 }
@@ -88,11 +95,12 @@ std::ostream& operator<<(std::ostream& stream, const Disconnected&) {
 }
 
 ArrayOfPairs Array::pairwise() const {
-	return ArrayOfPairs{*this};
+	return {mElements, mCount};
 }
 
-ArrayOfPairs::ArrayOfPairs(const Array& array) : Array(array) {
-	if (mCount % 2 != 0) {
+ArrayOfPairs::ArrayOfPairs(const redisReply* const* elements, std::size_t count)
+    : mElements(elements), mCount(count / 2) {
+	if (count % 2 != 0) {
 		throw std::logic_error{"Cannot view uneven Redis array as array of pairs"};
 	}
 }

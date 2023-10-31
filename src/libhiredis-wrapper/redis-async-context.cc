@@ -119,10 +119,12 @@ Session::Disconnecting::Disconnecting(Ready&& prev) : mCtx(std::move(prev.mCtx))
 int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback) const {
 	return command(args, std::move(callback),
 	               [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
-		               CommandCallback commandContext(rawCommandData);
+		               CommandCallback commandCallback(rawCommandData);
 
 		               auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
-		               (commandContext)(sessionContext, reply::tryFrom(static_cast<const redisReply*>(reply)));
+		               if (commandCallback) {
+			               commandCallback(sessionContext, reply::tryFrom(static_cast<const redisReply*>(reply)));
+		               }
 	               });
 }
 
