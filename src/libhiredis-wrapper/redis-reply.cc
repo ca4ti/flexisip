@@ -14,7 +14,6 @@
 #include <utility>
 
 #include "compat/hiredis/async.h"
-#include "read.h"
 #include "utils/variant-utils.hh"
 
 namespace flexisip::redis::reply {

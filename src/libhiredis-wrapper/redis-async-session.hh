@@ -20,6 +20,7 @@
 #include "flexisip/sofia-wrapper/waker.hh"
 
 #include "redis-args-packer.hh"
+#include "redis-auth.hh"
 #include "redis-reply.hh"
 #include "utils/stl-backports.hh"
 
@@ -71,6 +72,7 @@ public:
 		friend std::ostream& operator<<(std::ostream&, const Ready&);
 		friend class SubscriptionSession;
 
+		int auth(std::variant<auth::ACL, auth::Legacy>, CommandCallback&& callback);
 		// SAFETY: Do not use with subscribe
 		int command(const ArgsPacker& args, CommandCallback&& callback) const;
 
@@ -99,6 +101,10 @@ public:
 	Session();
 
 	State& getState();
+	template <typename T>
+	T* tryGetState() {
+		return std::get_if<T>(&mState);
+	}
 	const State& getState() const;
 	State& connect(su_root_t*, const std::string_view& address, int port);
 	State& disconnect();
@@ -124,13 +130,19 @@ private:
 	State mState{Disconnected()};
 };
 
+// From https://redis.io/commands/subscribe/
+// "Once the client enters the subscribed state it is not supposed to issue any other commands, except for
+// additional SUBSCRIBE, SSUBSCRIBE, PSUBSCRIBE, UNSUBSCRIBE, SUNSUBSCRIBE, PUNSUBSCRIBE, PING, RESET and QUIT
+// commands"
 class SubscriptionSession : Session {
 public:
 	using CommandCallback = Session::CommandCallback;
 
 	class Ready {
 	public:
-		int subscribe(const ArgsPacker& args, CommandCallback&& callback);
+		int auth(std::variant<auth::ACL, auth::Legacy>, CommandCallback&& callback);
+		int subscribe(const ArgsPacker::Args& args, CommandCallback&& callback);
+		int unsubscribe(const ArgsPacker::Args& args);
 
 	private:
 		Session::Ready mWrapped;
@@ -142,12 +154,30 @@ public:
 	State& getState() {
 		return reinterpret_cast<State&>(Session::getState());
 	}
+	template <typename T>
+	T* tryGetState() {
+		static_assert(!std::is_same_v<T, Session::Ready>,
+		              "Can't let you get a regular session interface from a subscriptions session.");
+		if constexpr (std::is_same_v<T, Ready>) {
+			return reinterpret_cast<Ready*>(Session::tryGetState<Session::Ready>());
+		} else {
+			return Session::tryGetState<T>();
+		}
+	}
 	State& connect(su_root_t* sofiaRoot, const std::string_view& address, int port) {
 		return reinterpret_cast<State&>(Session::connect(sofiaRoot, address, port));
 	}
 	State& disconnect() {
 		return reinterpret_cast<State&>(Session::disconnect());
 	}
+
+	void onConnect(std::function<void(int status)>&& handler) {
+		Session::onConnect(std::move(handler));
+	}
+	void onDisconnect(std::function<void(int status)>&& handler) {
+		Session::onDisconnect(std::move(handler));
+	}
 };
+static_assert(sizeof(SubscriptionSession) == sizeof(Session), "Must be reinterpret_cast-able");
 
 } // namespace flexisip::redis::async

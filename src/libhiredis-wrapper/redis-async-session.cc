@@ -4,6 +4,7 @@
 
 #include "redis-async-session.hh"
 
+#include <hiredis/read.h>
 #include <ios>
 #include <ostream>
 #include <sstream>
@@ -13,13 +14,55 @@
 
 #include "flexisip/logmanager.hh"
 
-#include "hiredis.h"
+#include "libhiredis-wrapper/redis-args-packer.hh"
+#include "libhiredis-wrapper/redis-auth.hh"
 #include "libhiredis-wrapper/redis-reply.hh"
 #include "registrardb-redis-sofia-event.h"
+#include "sofia-sip/su_wait.h"
 #include "utils/stl-backports.hh"
 #include "utils/variant-utils.hh"
 
 using namespace std::string_view_literals;
+
+typedef struct dictEntry {
+	void* key;
+	void* val;
+	struct dictEntry* next;
+} dictEntry;
+
+typedef struct dictType {
+	unsigned int (*hashFunction)(const void* key);
+	void* (*keyDup)(void* privdata, const void* key);
+	void* (*valDup)(void* privdata, const void* obj);
+	int (*keyCompare)(void* privdata, const void* key1, const void* key2);
+	void (*keyDestructor)(void* privdata, void* key);
+	void (*valDestructor)(void* privdata, void* obj);
+} dictType;
+typedef struct dict {
+	dictEntry** table;
+	dictType* type;
+	unsigned long size;
+	unsigned long sizemask;
+	unsigned long used;
+	void* privdata;
+} dict;
+#define dictHashKey(ht, key) (ht)->type->hashFunction(key)
+#define dictCompareHashKeys(ht, key1, key2)                                                                            \
+	(((ht)->type->keyCompare) ? (ht)->type->keyCompare((ht)->privdata, key1, key2) : (key1) == (key2))
+
+static dictEntry* dictFind(dict* ht, const void* key) {
+	dictEntry* he;
+	unsigned int h;
+
+	if (ht->size == 0) return NULL;
+	h = dictHashKey(ht, key) & ht->sizemask;
+	he = ht->table[h];
+	while (he) {
+		if (dictCompareHashKeys(ht, key, he->key)) return he;
+		he = he->next;
+	}
+	return NULL;
+}
 
 namespace flexisip::redis::async {
 
@@ -119,39 +162,88 @@ Session::Disconnecting::Disconnecting(Ready&& prev) : mCtx(std::move(prev.mCtx))
 int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback) const {
 	return command(args, std::move(callback),
 	               [](redisAsyncContext* asyncCtx, void* reply, void* rawCommandData) noexcept {
-		               CommandCallback commandCallback(rawCommandData);
+		               CommandCallback callback(rawCommandData);
 
 		               auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
-		               if (commandCallback) {
-			               commandCallback(sessionContext, reply::tryFrom(static_cast<const redisReply*>(reply)));
+		               if (callback) {
+			               callback(sessionContext, reply::tryFrom(static_cast<const redisReply*>(reply)));
 		               }
 	               });
 }
 
-int SubscriptionSession::Ready::subscribe(const ArgsPacker& args, CommandCallback&& callback) {
-	return mWrapped.command(args, std::move(callback),
-	                        [](redisAsyncContext* asyncCtx, void* rawReply, void* rawCommandData) noexcept {
-		                        CommandCallback commandContext(rawCommandData);
-		                        if (rawReply == nullptr) { // Session is being freed
-			                        return;
-		                        }
-		                        auto* reply = static_cast<const redisReply*>(rawReply);
-		                        if (reply->element[0]->str == "unsubscribe"sv) {
-			                        return;
-		                        }
+int SubscriptionSession::Ready::subscribe(const ArgsPacker::Args& args, CommandCallback&& callback) {
+	ArgsPacker command{"SUBSCRIBE"};
+	command.addArgs(args);
+	auto* topic = command.getCArgs()[1];
+	auto* channels = mWrapped.mCtx->sub.channels;
+	auto* patterns = mWrapped.mCtx->sub.patterns;
+	SLOGD << "BEDUG chann size: " << channels->size << " used: " << channels->used << " privdata:" << channels->privdata
+	      << " patterns size: " << patterns->size << " used: " << patterns->used << " privdata: " << patterns->privdata;
+	auto* existing = dictFind(channels, topic);
+	if (existing) {
+		SLOGD << "BEDUG Topic: " << topic
+		      << " Existing entry: " << static_cast<redisCallback*>(existing->val)->privdata;
+	} else {
+		SLOGD << "BEDUG Topic: " << topic << " First entry";
+	}
 
-		                        auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
-		                        (commandContext)(sessionContext, reply::tryFrom(reply));
-		                        commandContext.leak(); // Let the context live until next callback
-	                        });
+	return mWrapped.command(
+	    command, std::move(callback), [](redisAsyncContext* asyncCtx, void* rawReply, void* rawCommandData) noexcept {
+		    CommandCallback callback(rawCommandData);
+		    auto& sessionContext = *static_cast<Session*>(asyncCtx->data);
+		    auto reply = reply::tryFrom(static_cast<const redisReply*>(rawReply));
+		    SLOGD << "BEDUG about to call " << rawCommandData << " with " << StreamableVariant(reply);
+		    bool lastCall = Match(reply).against([](const reply::Disconnected&) { return true; },
+		                                         [](const reply::Array& message) {
+			                                         try {
+				                                         auto type = unwrap<reply::String>(message[0]);
+				                                         if (type != "unsubscribe") return false;
+				                                         return true;
+				                                         auto subscriptionCount = unwrap<reply::Integer>(message[2]);
+				                                         return subscriptionCount <= 1;
+			                                         } catch (const std::bad_variant_access&) {
+				                                         return false;
+			                                         }
+		                                         },
+		                                         [](const auto&) { return false; });
+		    if (callback) {
+			    callback(sessionContext, std::move(reply));
+		    }
+		    SLOGD << "BEDUG mv only fn at " << rawCommandData << " last call? " << lastCall;
+		    if (!lastCall) callback.leak(); // Let the context live until the next callback
+	    });
+}
+int SubscriptionSession::Ready::unsubscribe(const ArgsPacker::Args& args) {
+	ArgsPacker command{"UNSUBSCRIBE"};
+	command.addArgs(args);
+	return mWrapped.command(command, {}, nullptr);
+}
+
+int Session::Ready::auth(std::variant<auth::ACL, auth::Legacy> credentials, CommandCallback&& callback) {
+	return command(Match(credentials)
+	                   .against(
+	                       [](redis::auth::Legacy legacy) -> ArgsPacker {
+		                       return {"AUTH", legacy.password};
+	                       },
+	                       [](redis::auth::ACL acl) -> ArgsPacker {
+		                       return {"AUTH", acl.user, acl.password};
+	                       }),
+	               std::move(callback));
+}
+int SubscriptionSession::Ready::auth(std::variant<auth::ACL, auth::Legacy> credentials, CommandCallback&& callback) {
+	return mWrapped.auth(credentials, std::move(callback));
 }
 
 int Session::Ready::command(const ArgsPacker& args, CommandCallback&& callback, redisCallbackFn* fn) const {
-	return redisAsyncCommandArgv(
-	    mCtx.get(), fn, callback.leak(), args.getArgCount(),
+	auto* leaked = callback.leak();
+	SLOGD << "BEDUG args: " << args << " leaked ctx: " << leaked;
+	auto success = redisAsyncCommandArgv(
+	    mCtx.get(), fn, leaked, args.getArgCount(),
 	    // This const char** signature supposedly suggests that while the array itself is const, its elements are not.
 	    // But I don't see a reason the args would be modified by this function, so I assume this is just a mistake.
 	    const_cast<const char**>(args.getCArgs()), args.getArgSizes());
+	if (success != REDIS_OK) delete leaked;
+	return success;
 }
 
 Session::State& Session::getState() {

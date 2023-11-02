@@ -16,8 +16,6 @@
     along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "async.h"
-#include "registrar/registrar-db.hh"
 #include "registrardb-redis.hh"
 
 #include <algorithm>
@@ -42,14 +40,15 @@
 
 #include "compat/hiredis/hiredis.h"
 #include "libhiredis-wrapper/redis-args-packer.hh"
-#include "libhiredis-wrapper/redis-async-session.hh"
 #include "libhiredis-wrapper/redis-async-script.hh"
+#include "libhiredis-wrapper/redis-async-session.hh"
 #include "libhiredis-wrapper/redis-reply.hh"
 #include "recordserializer.hh"
 #include "registrar/exceptions.hh"
 #include "registrar/extended-contact.hh"
-#include "registrardb-redis-sofia-event.h"
+#include "registrar/registrar-db.hh"
 #include "timed-redis-command.hh"
+#include "utils/string-utils.hh"
 #include "utils/variant-utils.hh"
 
 /* The timeout to retry a bind request after encountering a failure. It gives us a chance to reconnect to a new
@@ -91,47 +90,15 @@ RegistrarDbRedisAsync::RegistrarDbRedisAsync(const std::shared_ptr<sofiasip::SuR
 	};
 	mCommandSession.onConnect(reconnectOnError);
 	mCommandSession.onDisconnect(reconnectOnError);
-}
-
-RegistrarDbRedisAsync::~RegistrarDbRedisAsync() {
-	if (mSubscriptionSession) {
-		redisAsyncDisconnect(mSubscriptionSession);
-	}
-}
-
-void RegistrarDbRedisAsync::onSubscribeDisconnect(const redisAsyncContext* c, int status) {
-	if (mSubscriptionSession != nullptr && mSubscriptionSession != c) {
-		LOGE("Redis subscribe context %p disconnected, but current context is %p", c, mSubscriptionSession);
-		return;
-	}
-
-	mSubscriptionSession = nullptr;
-	LOGD("Disconnected subscribe context %p...", c);
-	if (status != REDIS_OK) {
-		LOGE("Redis disconnection message: %s", c->errstr);
-		tryReconnect();
-		return;
-	}
-}
-
-void RegistrarDbRedisAsync::onSubscribeConnect(const redisAsyncContext* c, int status) {
-	if (status != REDIS_OK) {
-		LOGE("Couldn't connect for subscribe channel to redis: %s", c->errstr);
-		if (mSubscriptionSession != nullptr && mSubscriptionSession != c) {
-			LOGE("Redis subscribe context %p connection failed, but current subscribe context is %p", c,
-			     mSubscriptionSession);
-			return;
+	mSubscriptionSession.onConnect([this, reconnectOnError](int status) {
+		reconnectOnError(status);
+		if (!mContactListenersMap.empty()) {
+			LOGD("Now re-subscribing all topics we had before being disconnected.");
+			subscribeAll();
 		}
-		mSubscriptionSession = nullptr;
-		tryReconnect();
-		return;
-	}
-	LOGD("REDIS Connection done for subscribe channel %p", c);
-	if (!mContactListenersMap.empty()) {
-		LOGD("Now re-subscribing all topics we had before being disconnected.");
-		subscribeAll();
-	}
-	subscribeToKeyExpiration();
+		subscribeToKeyExpiration();
+	});
+	mSubscriptionSession.onDisconnect(reconnectOnError);
 }
 
 bool RegistrarDbRedisAsync::isConnected() {
@@ -369,12 +336,14 @@ void RegistrarDbRedisAsync::handleReplicationInfoReply(const reply::String& repl
 	}
 }
 
-void RegistrarDbRedisAsync::handleAuthReply(const redisReply* reply) {
-	if (!reply || reply->type == REDIS_REPLY_ERROR) {
-		LOGE("Couldn't authenticate with Redis server");
+void RegistrarDbRedisAsync::handleAuthReply(Reply reply) {
+	if (auto* err = std::get_if<reply::Error>(&reply)) {
+		SLOGE << "Couldn't authenticate with Redis server: " << *err;
 		asyncDisconnect();
 		return;
 	}
+
+	SLOGD << "Redis authentication succeeded. Reply: " << StreamableVariant(reply);
 
 	Match(mCommandSession.getState())
 	    .against([this](Session::Ready& session) { getReplicationInfo(session); },
@@ -394,13 +363,32 @@ void RegistrarDbRedisAsync::getReplicationInfo(Session::Ready& cmdSession) {
 		    [](const auto& unexpected) { SLOGE << "Unexpected reply to INFO command: " << unexpected; });
 	});
 
-	if (mSubscriptionSession) {
-		// Workaround for issue https://github.com/redis/hiredis/issues/396
-		redisAsyncCommand(mSubscriptionSession, sPublishCallback, nullptr, "SUBSCRIBE %s", "FLEXISIP");
+	auto* subs = mSubscriptionSession.tryGetState<SubscriptionSession::Ready>();
+	if (!subs) return;
+
+	subs->subscribe({"FLEXISIP"}, [this](Session&, Reply reply) { handlePublish(std::move(reply)); });
+}
+
+void RegistrarDbRedisAsync::handlePublish(Reply reply) {
+	try {
+		const auto array = unwrap<reply::Array>(reply);
+		const auto messageType = unwrap<reply::String>(array[0]);
+		const auto channel = unwrap<reply::String>(array[1]);
+		const auto messageOrSubsCount = array[2];
+		if (messageType == "message") {
+			const auto& message = std::get<reply::String>(messageOrSubsCount);
+			SLOGD << "Publish array received: [" << messageType << ", " << channel << ", " << message << "]";
+			notifyContactListener(string(channel), string(message));
+		} else {
+			const auto subscriptionCount = std::get<reply::Integer>(messageOrSubsCount);
+			SLOGD << "'" << messageType << "' request on '" << channel << "' channel succeeded. " << subscriptionCount
+			      << " current subscriptions";
+		}
+	} catch (const std::bad_variant_access&) {
 	}
 }
 
-optional<tuple<Session::Ready&, redisAsyncContext&>> RegistrarDbRedisAsync::connect() {
+optional<tuple<Session::Ready&, SubscriptionSession::Ready&>> RegistrarDbRedisAsync::connect() {
 	SLOGD << "Connecting to Redis server tcp://" << mParams.domain << ":" << mParams.port;
 	SLOGD << "Creating main Redis connection";
 	Session::Ready* cmdSession = nullptr;
@@ -410,78 +398,41 @@ optional<tuple<Session::Ready&, redisAsyncContext&>> RegistrarDbRedisAsync::conn
 	}
 
 	SLOGD << "Creating subscription Redis connection";
-	mSubscriptionSession = redisAsyncConnect(mParams.domain.c_str(), mParams.port);
-	mSubscriptionSession->data = this;
-	if (mSubscriptionSession->err) {
-		SLOGE << "Redis Connection error: " << mSubscriptionSession->errstr;
-		redisAsyncFree(mSubscriptionSession);
-		mSubscriptionSession = nullptr;
-		return {};
-	}
-
-#ifndef WITHOUT_HIREDIS_CONNECT_CALLBACK
-	redisAsyncSetConnectCallback(mSubscriptionSession, sSubscribeConnectCallback);
-#endif
-
-	redisAsyncSetDisconnectCallback(mSubscriptionSession, sSubscribeDisconnectCallback);
-
-	if (REDIS_OK != redisSofiaAttach(mSubscriptionSession, mRoot->getCPtr())) {
-		LOGE("Redis Connection error - %p", mSubscriptionSession);
-		redisAsyncDisconnect(mSubscriptionSession);
-		mSubscriptionSession = nullptr;
-		return {};
+	SubscriptionSession::Ready* subsSession = nullptr;
+	{
+		auto& state = mSubscriptionSession.connect(mRoot->getCPtr(), mParams.domain.c_str(), mParams.port);
+		if ((subsSession = std::get_if<SubscriptionSession::Ready>(&state)) == nullptr) return {};
 	}
 
 	// Clear any pending timing context remaining from a previous connection
 	mTimedCommand = {};
 
-	const auto authenticate = [this, cmdSession](const redis::ArgsPacker& args) {
-		cmdSession->command(args, [this](const Session&, Reply reply) {
-			if (auto* err = std::get_if<reply::Error>(&reply)) {
-				SLOGE << "Couldn't authenticate with Redis server: " << *err;
-				asyncDisconnect();
-				return;
-			}
-			SLOGD << "Redis authentication succeeded. Reply: " << StreamableVariant(reply);
-			if (auto* session = std::get_if<Session::Ready>(&mCommandSession.getState())) {
-				getReplicationInfo(*session);
-			}
-		});
-		mTimedCommand.send(mSubscriptionSession, sHandleAuthReply, this, args);
-	};
-
 	Match(mParams.auth)
 	    .against([this, cmdSession](redis::auth::None) { getReplicationInfo(*cmdSession); },
-	             [&authenticate](redis::auth::Legacy legacy) {
-		             authenticate({"AUTH", legacy.password});
-	             },
-	             [&authenticate](redis::auth::ACL acl) {
-		             authenticate({"AUTH", acl.user, acl.password});
+	             [this, cmdSession, subsSession](auto credentials) {
+		             cmdSession->auth(credentials, [this](auto&, Reply reply) { handleAuthReply(reply); });
+		             subsSession->auth(credentials, [this](auto&, Reply reply) { handleAuthReply(reply); });
 	             });
 
 	mLastActiveParams = mParams;
-	return {{*cmdSession, *mSubscriptionSession}};
+	return {{*cmdSession, *subsSession}};
 }
 
 void RegistrarDbRedisAsync::asyncDisconnect() {
 	setWritable(false);
 	mCommandSession.disconnect();
-	if (mSubscriptionSession) {
+	if (auto* ready = mSubscriptionSession.tryGetState<SubscriptionSession::Ready>()) {
 		// Workaround for issue https://github.com/redis/hiredis/issues/396
 		// Fixed in hiredis 0.14.0
-		redisAsyncCommand(mSubscriptionSession, nullptr, nullptr, "UNSUBSCRIBE %s", "FLEXISIP");
-		redisAsyncDisconnect(mSubscriptionSession);
-		mSubscriptionSession = nullptr;
+		ready->unsubscribe({"FLEXISIP"});
 	}
+	mSubscriptionSession.disconnect();
 	SLOGD << "Redis server disconnecting...";
 }
 void RegistrarDbRedisAsync::forceDisconnect() {
 	setWritable(false);
 	mCommandSession.getState() = Session::Disconnected();
-	if (mSubscriptionSession) {
-		redisAsyncFree(mSubscriptionSession);
-		mSubscriptionSession = nullptr;
-	}
+	mSubscriptionSession.getState() = Session::Disconnected();
 	SLOGD << "Redis server force-disconnected";
 }
 
@@ -496,21 +447,34 @@ void RegistrarDbRedisAsync::subscribeAll() {
 }
 
 void RegistrarDbRedisAsync::subscribeToKeyExpiration() {
-	LOGD("Subscribing to key expiration");
-	if (mSubscriptionSession == nullptr) {
-		LOGE("RegistrarDbRedisAsync::subscribeToKeyExpiration(): no context !");
+	auto* ready = mSubscriptionSession.tryGetState<SubscriptionSession::Ready>();
+	if (!ready) {
+		SLOGE << "RegistrarDbRedisAsync::subscribeToKeyExpiration(): subscription session not ready!";
 		return;
 	}
-	redisAsyncCommand(mSubscriptionSession, sKeyExpirationPublishCallback, nullptr, "SUBSCRIBE __keyevent@0__:expired");
+
+	LOGD("Subscribing to key expiration");
+	ready->subscribe({"__keyevent@0__:expired"}, [this](auto&, Reply reply) {
+		try {
+			auto array = unwrap<reply::Array>(reply);
+			string_view key = unwrap<reply::String>(array[2]);
+			if (auto suffix = StringUtils::removePrefix(key, "fs:")) {
+				key = *suffix;
+			}
+			notifyContactListener(string(key), "");
+		} catch (const std::bad_variant_access&) {
+		}
+	});
 }
 
 void RegistrarDbRedisAsync::subscribeTopic(const string& topic) {
-	LOGD("Sending SUBSCRIBE command to redis for topic '%s'", topic.c_str());
-	if (mSubscriptionSession == nullptr) {
-		LOGE("RegistrarDbRedisAsync::subscribeTopic(): no context !");
-		return;
+	SLOGD << "Sending SUBSCRIBE command to Redis for topic '" << topic << "'";
+	auto* subs = mSubscriptionSession.tryGetState<SubscriptionSession::Ready>();
+	if (!subs) {
+		SLOGE << "RegistrarDbRedisAsync::subscribeTopic(): Subscription session not ready!";
 	}
-	redisAsyncCommand(mSubscriptionSession, sPublishCallback, nullptr, "SUBSCRIBE %s", topic.c_str());
+
+	subs->subscribe({topic}, [this](Session&, Reply reply) { handlePublish(std::move(reply)); });
 }
 
 /*TODO: the listener should be also used to report when the subscription is active.
@@ -529,8 +493,11 @@ bool RegistrarDbRedisAsync::subscribe(const string& topic, std::weak_ptr<Contact
 void RegistrarDbRedisAsync::unsubscribe(const string& topic, const shared_ptr<ContactRegisteredListener>& listener) {
 	RegistrarDb::unsubscribe(topic, listener);
 	if (mContactListenersMap.count(topic) == 0) {
-		SLOGD << "Sending UNSUBSCRIBE command to Redis for topic '" << topic << "'";
-		redisAsyncCommand(mSubscriptionSession, nullptr, nullptr, "UNSUBSCRIBE %s", topic.c_str());
+		// No listeners left, unsubscribing
+		if (auto* ready = mSubscriptionSession.tryGetState<SubscriptionSession::Ready>()) {
+			SLOGD << "Sending UNSUBSCRIBE command to Redis for topic '" << topic << "'";
+			ready->unsubscribe({topic});
+		}
 	}
 }
 
@@ -546,61 +513,6 @@ void RegistrarDbRedisAsync::publish(const string& topic, const string& uid) {
 
 /* Static functions that are used as callbacks to redisAsync API */
 
-#ifndef WITHOUT_HIREDIS_CONNECT_CALLBACK
-void RegistrarDbRedisAsync::sSubscribeConnectCallback(const redisAsyncContext* c, int status) {
-	RegistrarDbRedisAsync* zis = (RegistrarDbRedisAsync*)c->data;
-	if (zis) {
-		zis->onSubscribeConnect(c, status);
-	}
-}
-#endif
-
-void RegistrarDbRedisAsync::sSubscribeDisconnectCallback(const redisAsyncContext* c, int status) {
-	RegistrarDbRedisAsync* zis = (RegistrarDbRedisAsync*)c->data;
-	if (zis) {
-		zis->onSubscribeDisconnect(c, status);
-	}
-}
-
-void RegistrarDbRedisAsync::sPublishCallback(redisAsyncContext* c, void* r, [[maybe_unused]] void* privcontext) {
-	const auto* reply = static_cast<redisReply*>(r);
-	if (reply == nullptr) return;
-
-	if (reply->type == REDIS_REPLY_ARRAY) {
-		const auto& messageType = reply->element[0]->str;
-		const auto& channel = reply->element[1]->str;
-		if (strcasecmp(messageType, "message") == 0) {
-			const auto& message = reply->element[2]->str;
-			SLOGD << "Publish array received: [" << messageType << ", " << channel << ", " << message << "]";
-			auto* zis = static_cast<RegistrarDbRedisAsync*>(c->data);
-			if (zis) {
-				zis->notifyContactListener(reply->element[1]->str, reply->element[2]->str);
-			}
-		} else {
-			const auto& nSubscriptions = reply->element[2]->integer;
-			SLOGD << "'" << messageType << "' request on '" << channel << "' channel succeeded. " << nSubscriptions
-			      << " actual subscriptions";
-		}
-	}
-}
-
-void RegistrarDbRedisAsync::sKeyExpirationPublishCallback(redisAsyncContext* c, void* r, void*) {
-	redisReply* reply = reinterpret_cast<redisReply*>(r);
-	if (!reply) return;
-
-	if (reply->type == REDIS_REPLY_ARRAY) {
-		if (reply->element[2]->str != nullptr) {
-			RegistrarDbRedisAsync* zis = reinterpret_cast<RegistrarDbRedisAsync*>(c->data);
-			if (zis) {
-				string prefix = "fs:";
-				string key = reply->element[2]->str;
-				if (key.substr(0, prefix.size()) == prefix) key = key.substr(prefix.size());
-				zis->notifyContactListener(key, "");
-			}
-		}
-	}
-}
-
 void RegistrarDbRedisAsync::sHandleSubcommandReply(redisAsyncContext*, redisReply* reply, std::string* cmd) {
 	auto redisError = reply ? (reply->type == REDIS_REPLY_ERROR ? reply->str : nullptr) : "empty response";
 	if (redisError) {
@@ -613,13 +525,6 @@ void RegistrarDbRedisAsync::onHandleInfoTimer() {
 	if (auto* session = std::get_if<Session::Ready>(&mCommandSession.getState())) {
 		SLOGI << "Launching periodic INFO query on REDIS";
 		getReplicationInfo(*session);
-	}
-}
-
-void RegistrarDbRedisAsync::sHandleAuthReply([[maybe_unused]] redisAsyncContext* ac, void* r, void* privcontext) {
-	RegistrarDbRedisAsync* zis = (RegistrarDbRedisAsync*)privcontext;
-	if (zis) {
-		zis->handleAuthReply((const redisReply*)r);
 	}
 }
 

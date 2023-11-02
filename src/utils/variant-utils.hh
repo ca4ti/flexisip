@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -89,5 +90,11 @@ private:
 };
 
 #define EXPECT_VARIANT(type) Expect<type>(#type, __FILE__, __LINE__)
+
+template <typename TExpected, typename TVariant>
+TExpected unwrap(TVariant&& variant) {
+	return Match(variant).against([](TExpected&& expected) -> TExpected { return expected; },
+	                              [](const auto&) -> TExpected { throw std::bad_variant_access(); });
+}
 
 } // namespace flexisip

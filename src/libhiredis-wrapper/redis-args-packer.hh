@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <initializer_list>
 #include <list>
 #include <sstream>
 #include <string>
@@ -14,6 +15,8 @@ namespace flexisip::redis {
 /* Utility struct to create argument vectors to pass to redis, for HSET and HDEL requests for example.*/
 class ArgsPacker {
 public:
+	using Args = std::initializer_list<std::string>;
+
 	template <typename... Args>
 	ArgsPacker(const std::string& command, Args&&... args) {
 		addArg(command);
@@ -26,6 +29,12 @@ public:
 	void addFieldName(const std::string& fieldName) {
 		addArg(fieldName);
 	}
+	void addArgs(const Args& args) {
+		for (const auto& arg : args) {
+			addArg(arg);
+		}
+	}
+
 	const char* const* getCArgs() const {
 		return &mCArgs[0];
 	}

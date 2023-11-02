@@ -18,9 +18,7 @@ void Script::call(const Session::Ready& session,
                   std::initializer_list<std::string>&& scriptArgs,
                   Session::CommandCallback&& callback) const {
 	auto args = std::make_unique<ArgsPacker>("EVALSHA", mSHA1, "1", "fs:*");
-	for (const auto& scriptArg : scriptArgs) {
-		args->addFieldName(scriptArg);
-	}
+	args->addArgs(scriptArgs);
 
 	auto& argsRef = *args;
 	session.command(argsRef, [callScriptArgs = std::move(args), callback = std::move(callback),
